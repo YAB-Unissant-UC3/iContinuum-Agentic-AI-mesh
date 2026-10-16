@@ -1,0 +1,10 @@
+FICTIONAL SYNTHETIC DOCUMENT - Meeting Notes
+Project: Cedar Bridge Document Review Pilot
+Meeting date: October 12, 2026
+
+The team confirmed that both applications will share the Python backend.
+The reader will return original text and line references to the analysis agent.
+The audit agent will verify that cited source lines support each claim.
+The operations lead requested that audit records be retained for 90 days.
+The retention request has not yet been reconciled with REQ-006.
+The target launch date remains November 16, 2026.
