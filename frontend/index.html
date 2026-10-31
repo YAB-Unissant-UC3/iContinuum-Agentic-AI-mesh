@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A local document workspace for source-supported review.">
+  <title>iContinuum · Document workspace</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to workspace</a>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="iContinuum home"><span class="brand-mark" aria-hidden="true">iC</span> iContinuum<span class="brand-dot">.</span></a>
+    <div class="workspace-label">TEAM WORKSPACE <span>POC</span></div>
+    <div class="sidebar-current"><span aria-hidden="true">▤</span> Document workspace <span class="nav-marker">01</span></div>
+    <div class="sidebar-section">THE AGENT MESH</div>
+    <ol class="agent-list">
+      <li><span class="agent-number ready">1</span><div><strong>Document Reader</strong><small id="reader-status">Checking connection…</small></div></li>
+      <li><span class="agent-number">2</span><div><strong>Analysis Agent</strong><small>Awaiting integration</small></div></li>
+      <li><span class="agent-number">3</span><div><strong>Audit Agent</strong><small>Awaiting integration</small></div></li>
+    </ol>
+    <div class="sidebar-note"><span class="tiny-label">BUILT ON EVIDENCE</span><p>Every source has a place.<br>Every line has a reference.</p><span class="note-rule"></span><small>Unissant Challenge X<br>Three agents. One shared foundation.</small></div>
+    <div class="local-note"><span class="status-dot"></span> Local workspace <span>v0.2</span></div>
+  </aside>
+  <div class="page">
+    <header class="topbar"><div>Workspace <span class="breadcrumb-divider">/</span> <strong>Documents</strong></div><a class="connection" href="/api/health" target="_blank" rel="noopener"><span class="status-dot" id="connection-dot"></span><span id="connection-label">Connecting</span><span aria-hidden="true">↗</span></a></header>
+    <main id="main">
+      <div class="page-heading"><div><p class="eyebrow">THE FOUNDATION FOR SOURCE-SUPPORTED AI</p><h1>Start with the evidence<span>.</span></h1><p class="intro">Bring your documents together. Keep every word traceable.</p></div><button class="button secondary" id="export-button" disabled><span aria-hidden="true">↓</span> Download JSON</button></div>
+      <div class="summary-bar" aria-label="Workspace summary"><div><strong id="document-count">00</strong><span>Documents</span></div><div><strong id="line-count">00</strong><span>Source lines</span></div><div><strong id="ready-count">00</strong><span>Ready for handoff</span></div><p><span class="small-spark" aria-hidden="true">✳</span> Original text. Preserved locations.</p></div>
+      <section class="upload-section" aria-labelledby="add-heading"><div class="section-heading"><h2 id="add-heading"><span class="section-number">01</span> Add your documents</h2><span class="muted">UTF-8 text files</span></div><div class="dropzone" id="dropzone"><div class="upload-symbol" aria-hidden="true">↑</div><div class="dropzone-copy"><strong>Drop your .txt files here</strong><p>Or choose files from your computer. Your text stays local.</p><small>Up to 12 documents · 256 KiB and 10,000 lines per file</small></div><button class="button primary" id="browse-button">Choose files <span aria-hidden="true">+</span></button><input id="file-input" type="file" accept=".txt,text/plain" multiple hidden></div><div class="demo-row"><span>Exploring the workspace?</span><button class="text-button" id="demo-button">Load 3 fictional examples <span aria-hidden="true">→</span></button><span class="demo-detail">Includes a retention-policy disagreement for later analysis.</span></div></section>
+      <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
+      <section class="review-section" aria-labelledby="review-heading"><div class="section-heading"><h2 id="review-heading"><span class="section-number">02</span> Explore your sources</h2><button class="text-button subtle" id="clear-button" disabled>Clear workspace</button></div><div class="review-grid"><div class="document-panel"><div class="panel-label">SOURCE LIBRARY <span id="library-count">0</span></div><div id="document-list" class="document-list"></div><p class="library-empty" id="library-empty">Your documents will appear here.</p><div class="library-footer"><span class="status-dot"></span> Text extracted without summarization</div></div><div class="source-panel"><div class="viewer-toolbar"><div class="viewer-title"><span class="file-symbol" aria-hidden="true">▤</span><strong id="viewer-name">Source preview</strong></div><div class="view-tabs" aria-label="Preview format"><button id="source-tab" aria-pressed="true">Source</button><button id="json-tab" aria-pressed="false">JSON</button></div></div><div class="source-meta" id="source-meta" hidden></div><div id="viewer-empty" class="viewer-empty"><span class="empty-illustration" aria-hidden="true">≡</span><h3>A clear view of the original.</h3><p>Add a document or load the examples to explore<br>its text and numbered source lines.</p></div><div id="source-lines" class="source-lines" hidden></div><pre id="json-preview" class="json-preview" hidden></pre><div class="citation-bar"><div><span class="tiny-label">SOURCE REFERENCE</span><p id="citation-hint">Select a source line to create a citation.</p></div><button class="button small secondary" id="copy-button" disabled>Copy citation</button></div></div></div></section>
+      <section class="handoff" aria-labelledby="handoff-heading"><div><p class="eyebrow">NEXT IN THE MESH</p><h2 id="handoff-heading">From source text to supported answers.</h2><p>Your sources are the shared starting point for both applications.</p></div><div class="handoff-controls"><div class="task-switch" aria-label="Analysis application"><button id="brief-task" aria-pressed="true">Brief Generator</button><button id="requirements-task" aria-pressed="false">Requirements Checker</button></div><p id="task-description">Prepare the source documents for a cited brief.</p><button class="text-button" id="request-button" disabled>Download handoff for Analysis Agent <span aria-hidden="true">↗</span></button><small>Analysis and citation auditing are not connected yet.</small></div></section>
+      <footer><span>iContinuum / Unissant Challenge X</span><span>Local proof of concept · No model connected</span></footer>
+    </main>
+  </div>
+</body>
+</html>
