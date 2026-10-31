@@ -85,9 +85,9 @@ function renderViewer() {
   $('source-lines').hidden = state.view !== 'source' || !hasLines;
   $('viewer-empty').hidden = Boolean(source && (state.view === 'json' || hasLines));
   const title = $('viewer-empty').querySelector('h3');
-  const description = $('viewer-empty').querySelector('p');
-  title.textContent = source?.status === 'error' ? 'This document could not be read.' : source?.status === 'empty' ? 'This document is empty.' : 'A clear view of the original.';
-  description.textContent = source?.error?.message || (source?.status === 'empty' ? 'The file has a stable ID, but contains no source lines.' : 'Add a document or load the examples to explore its text and numbered source lines.');
+  const description = $('viewer-empty').querySelector('h3 + p');
+  title.textContent = source?.status === 'error' ? 'This document could not be read.' : source?.status === 'empty' ? 'This document is empty.' : 'No source selected.';
+  description.textContent = source?.error?.message || (source?.status === 'empty' ? 'The file has a stable ID, but contains no source lines.' : 'Upload a text file or load the sample documents to view numbered lines.');
   $('source-tab').setAttribute('aria-pressed', String(state.view === 'source'));
   $('json-tab').setAttribute('aria-pressed', String(state.view === 'json'));
   const fragment = document.createDocumentFragment();
@@ -123,11 +123,13 @@ function render() {
     const select = element('button', 'document-select');
     select.setAttribute('aria-pressed', String(index === state.selected));
     const info = element('span', 'document-info');
-    const label = source.status === 'error' ? 'Could not read file' : source.status === 'empty' ? 'Empty file' : `${source.line_count} lines · Source preserved`;
+    const label = source.status === 'error' ? 'Could not read file' : source.status === 'empty' ? 'Empty file' : `${source.line_count} source lines`;
     info.append(element('span', 'document-name', source.file_name), element('span', `document-subtitle${source.status === 'error' ? ' has-error' : ''}`, label));
-    select.append(element('span', 'file-symbol', '▤'), info);
+    const documentNumber = element('span', 'document-index', String(index + 1).padStart(2, '0'));
+    documentNumber.setAttribute('aria-hidden', 'true');
+    select.append(documentNumber, info);
     select.addEventListener('click', () => { state.selected = index; state.start = null; state.end = null; render(); });
-    const remove = element('button', 'remove-document', '×');
+    const remove = element('button', 'remove-document', 'Remove');
     remove.disabled = state.busy;
     remove.setAttribute('aria-label', `Remove ${source.file_name}`);
     remove.addEventListener('click', () => {
@@ -219,14 +221,14 @@ for (const task of ['brief', 'requirements']) $(`${task}-task`).addEventListener
   state.task = task;
   $('brief-task').setAttribute('aria-pressed', String(task === 'brief'));
   $('requirements-task').setAttribute('aria-pressed', String(task === 'requirements'));
-  $('task-description').textContent = task === 'brief' ? 'Prepare the source documents for a cited brief.' : 'Prepare the source documents for requirements review.';
+  $('task-description').textContent = task === 'brief' ? 'Prepare documents for a cited brief.' : 'Prepare documents for requirements review.';
 });
 async function checkConnection() {
   try {
     const health = await request('/api/health');
     Object.assign(limits, health.limits);
     $('connection-label').textContent = 'Reader connected';
-    $('reader-status').textContent = 'Connected · Local';
+    $('reader-status').textContent = 'Connected locally';
   } catch {
     $('connection-label').textContent = 'API unavailable';
     $('connection-dot').classList.add('offline');
