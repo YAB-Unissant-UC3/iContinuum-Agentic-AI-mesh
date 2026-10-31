@@ -1,0 +1,10 @@
+FICTIONAL SYNTHETIC DOCUMENT - Requirements
+Project: Cedar Bridge Document Review Pilot
+
+REQ-001: Read UTF-8 .txt files without summarizing their contents.
+REQ-002: Assign a repeatable document ID based on file contents.
+REQ-003: Preserve blank lines and use line numbers starting at 1.
+REQ-004: Return structured JSON for successful and unsuccessful reads.
+REQ-005: Every generated claim must cite a document ID and source line range.
+REQ-006: Retain audit records for 30 days.
+REQ-007: The pilot must work locally without an external API.

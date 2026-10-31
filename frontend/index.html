@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A local document workspace for source-supported review.">
+  <title>Document workspace | iContinuum</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to workspace</a>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="iContinuum home">iContinuum</a>
+    <p class="workspace-label">Document review / PoC</p>
+    <nav class="workspace-nav" aria-label="Workspace sections">
+      <a href="#upload"><span>01</span> Upload documents</a>
+      <a href="#sources"><span>02</span> Read sources</a>
+      <a href="#handoff"><span>03</span> Prepare analysis</a>
+    </nav>
+    <h2 class="sidebar-section">Agent status</h2>
+    <ol class="agent-list">
+      <li><span class="agent-number ready">01</span><div><strong>Document Reader</strong><small id="reader-status">Checking connection...</small></div></li>
+      <li><span class="agent-number">02</span><div><strong>Analysis Agent</strong><small>Not connected</small></div></li>
+      <li><span class="agent-number">03</span><div><strong>Audit Agent</strong><small>Not connected</small></div></li>
+    </ol>
+    <div class="sidebar-note"><span class="tiny-label">Local storage</span><p>Files stay in memory.<br>Refreshing clears this workspace.</p></div>
+    <div class="local-note">Local prototype <span>v0.2</span></div>
+  </aside>
+  <div class="page">
+    <header class="topbar">
+      <span>Unissant Challenge X</span>
+      <a class="connection" href="/api/health" target="_blank" rel="noopener" aria-label="Reader connection status; opens API status in a new tab">
+        <span class="status-dot" id="connection-dot" aria-hidden="true"></span>
+        <span id="connection-label">Connecting</span>
+      </a>
+    </header>
+    <main id="main">
+      <div class="page-heading">
+        <div>
+          <p class="eyebrow">Document Reader</p>
+          <h1>Document workspace</h1>
+          <p class="intro">Read text files, inspect source lines, and export evidence.</p>
+        </div>
+        <button class="button secondary" id="export-button" disabled>Download JSON</button>
+      </div>
+      <div class="summary-bar" aria-label="Workspace summary">
+        <div><strong id="document-count">00</strong><span>Documents</span></div>
+        <div><strong id="line-count">00</strong><span>Source lines</span></div>
+        <div><strong id="ready-count">00</strong><span>Ready for analysis</span></div>
+        <p>Original text is preserved. <br>Analysis and audit are not connected.</p>
+      </div>
+      <section class="upload-section" id="upload" aria-labelledby="add-heading">
+        <div class="section-heading">
+          <h2 id="add-heading"><span class="section-number">01</span> Upload documents</h2>
+          <span class="muted">.txt / UTF-8</span>
+        </div>
+        <div class="dropzone" id="dropzone">
+          <div class="dropzone-copy">
+            <strong>Drop text files here or choose them from your computer.</strong>
+            <p>Up to 12 documents. Each file: 256 KiB and 10,000 lines maximum.</p>
+          </div>
+          <button class="button primary" id="browse-button">Choose files</button>
+          <input id="file-input" type="file" accept=".txt,text/plain" multiple hidden>
+        </div>
+        <div class="demo-row">
+          <button class="text-button" id="demo-button">Load 3 fictional documents</button>
+          <span class="demo-detail">The sample set includes conflicting retention statements.</span>
+        </div>
+      </section>
+      <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
+      <section class="review-section" id="sources" aria-labelledby="review-heading">
+        <div class="section-heading">
+          <h2 id="review-heading"><span class="section-number">02</span> Read sources</h2>
+          <button class="text-button subtle" id="clear-button" disabled>Clear workspace</button>
+        </div>
+        <div class="review-grid">
+          <div class="document-panel">
+            <div class="panel-label">Documents <span id="library-count">0</span></div>
+            <div id="document-list" class="document-list"></div>
+            <p class="library-empty" id="library-empty">No documents added.</p>
+            <p class="library-footer">Original text. No summarization.</p>
+          </div>
+          <div class="source-panel">
+            <div class="viewer-toolbar">
+              <strong id="viewer-name">Source preview</strong>
+              <div class="view-tabs" aria-label="Preview format">
+                <button id="source-tab" aria-pressed="true">Source</button>
+                <button id="json-tab" aria-pressed="false">JSON</button>
+              </div>
+            </div>
+            <div class="source-meta" id="source-meta" hidden></div>
+            <div id="viewer-empty" class="viewer-empty">
+              <p class="tiny-label">Source preview</p>
+              <h3>No source selected.</h3>
+              <p>Upload a text file or load the sample documents to view numbered lines.</p>
+            </div>
+            <div id="source-lines" class="source-lines" hidden></div>
+            <pre id="json-preview" class="json-preview" hidden></pre>
+            <div class="citation-bar">
+              <div><span class="tiny-label">Source reference</span><p id="citation-hint">Select a source line to create a citation.</p></div>
+              <button class="button small secondary" id="copy-button" disabled>Copy citation</button>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="handoff" id="handoff" aria-labelledby="handoff-heading">
+        <div class="handoff-copy">
+          <h2 id="handoff-heading"><span class="section-number">03</span> Prepare analysis</h2>
+          <p>Choose an application and download its source documents for the Analysis Agent.</p>
+          <p class="muted">Generated results and citation verification are not available yet.</p>
+        </div>
+        <div class="handoff-controls">
+          <div class="task-switch" aria-label="Analysis application">
+            <button id="brief-task" aria-pressed="true">Brief Generator</button>
+            <button id="requirements-task" aria-pressed="false">Requirements Checker</button>
+          </div>
+          <p id="task-description">Prepare documents for a cited brief.</p>
+          <button class="text-button" id="request-button" disabled>Download analysis request</button>
+        </div>
+      </section>
+      <footer><span>iContinuum / Unissant Challenge X</span><span>Local proof of concept</span></footer>
+    </main>
+  </div>
+</body>
+</html>
