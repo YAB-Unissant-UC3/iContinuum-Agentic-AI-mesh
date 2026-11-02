@@ -1,0 +1,10 @@
+FICTIONAL SYNTHETIC DOCUMENT - Project Brief
+Project: Cedar Bridge Document Review Pilot
+Purpose: Help reviewers trace project summaries back to source documents.
+
+The pilot will provide a Brief Generator and a Requirements Checker.
+Both applications will use the same Python backend.
+The first release will accept UTF-8 plain text files only.
+Every extracted source line must keep its original line number.
+Target launch date: November 16, 2026.
+The pilot must work locally without an external API.
