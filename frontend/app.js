@@ -33,7 +33,6 @@ function busy(value) {
 }
 
 function addDocuments(incoming) {
-  $('analysis-results').hidden = true;
   let duplicates = 0;
   let errors = 0;
   let added = 0;
@@ -134,7 +133,6 @@ function render() {
     remove.disabled = state.busy;
     remove.setAttribute('aria-label', `Remove ${source.file_name}`);
     remove.addEventListener('click', () => {
-      $('analysis-results').hidden = true;
       state.documents.splice(index, 1);
       state.selected = Math.min(index, state.documents.length - 1);
       state.start = null; state.end = null;
@@ -205,7 +203,6 @@ $('demo-button').addEventListener('click', async () => {
   finally { busy(false); }
 });
 $('clear-button').addEventListener('click', () => {
-  $('analysis-results').hidden = true;
   state.documents = []; state.selected = -1; state.start = null; state.end = null;
   render(); notice('Workspace cleared. Original files are unchanged.');
 });
@@ -217,42 +214,9 @@ $('copy-button').addEventListener('click', async () => {
   catch { notice(`Clipboard unavailable. Copy this reference: ${JSON.stringify(reference)}`); }
 });
 $('export-button').addEventListener('click', () => download('icontinuum-documents.json', { api_version: '1.0', documents: state.documents }));
-$('request-button').addEventListener('click', async () => {
-  if (state.busy) return;
-  busy(true);
-  $('request-button').disabled = true;
-  $('analysis-results').hidden = true;
-  try {
-    const payload = await request('/api/analysis', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ api_version: '1.0', task: state.task,
-        documents: state.documents.filter((item) => item.status === 'ok'),
-        requirements: $('requirements-input').value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) }),
-    });
-    const panel = $('analysis-results');
-    panel.replaceChildren(element('h2', '', 'Analysis results'),
-      element('p', '', `Source audit: ${payload.audit.status}`));
-    for (const claim of payload.claims) {
-      panel.append(element('p', '', claim.text));
-      for (const citation of claim.citations) {
-        const button = element('button', 'text-button', `${citation.document_id} ? line ${citation.line_start}`);
-        button.addEventListener('click', () => {
-          state.selected = state.documents.findIndex((doc) => doc.document_id === citation.document_id);
-          state.view = 'source'; state.start = citation.line_start; state.end = citation.line_end;
-          render(); $('sources').scrollIntoView();
-        });
-        panel.append(button);
-      }
-    }
-    for (const check of payload.requirement_checks) panel.append(element('p', '', `${check.text}: ${check.explanation}`));
-    for (const limitation of payload.limitations) panel.append(element('p', 'muted', limitation));
-    const exportResult = element('button', 'text-button', 'Download audited results');
-    exportResult.addEventListener('click', () => download('icontinuum-analysis.json', payload));
-    panel.append(exportResult); panel.hidden = false;
-    notice('Analysis complete. Review the cited extracts and limitations.');
-  } catch (error) { notice(error.message, true); }
-  finally { busy(false); render(); }
-});
+$('request-button').addEventListener('click', () => download('icontinuum-analysis-request.json', {
+  api_version: '1.0', task: state.task, documents: state.documents.filter((item) => item.status === 'ok'),
+}));
 for (const task of ['brief', 'requirements']) $(`${task}-task`).addEventListener('click', () => {
   state.task = task;
   $('brief-task').setAttribute('aria-pressed', String(task === 'brief'));
@@ -263,7 +227,7 @@ async function checkConnection() {
   try {
     const health = await request('/api/health');
     Object.assign(limits, health.limits);
-    $('connection-label').textContent = 'Agents connected';
+    $('connection-label').textContent = 'Reader connected';
     $('reader-status').textContent = 'Connected locally';
   } catch {
     $('connection-label').textContent = 'API unavailable';

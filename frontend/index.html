@@ -21,8 +21,8 @@
     <h2 class="sidebar-section">Agent status</h2>
     <ol class="agent-list">
       <li><span class="agent-number ready">01</span><div><strong>Document Reader</strong><small id="reader-status">Checking connection...</small></div></li>
-      <li><span class="agent-number">02</span><div><strong>Analysis Agent</strong><small>Extractive baseline</small></div></li>
-      <li><span class="agent-number">03</span><div><strong>Audit Agent</strong><small>Source validation</small></div></li>
+      <li><span class="agent-number">02</span><div><strong>Analysis Agent</strong><small>Not connected</small></div></li>
+      <li><span class="agent-number">03</span><div><strong>Audit Agent</strong><small>Not connected</small></div></li>
     </ol>
     <div class="sidebar-note"><span class="tiny-label">Local storage</span><p>Files stay in memory.<br>Refreshing clears this workspace.</p></div>
     <div class="local-note">Local prototype <span>v0.2</span></div>
@@ -48,7 +48,7 @@
         <div><strong id="document-count">00</strong><span>Documents</span></div>
         <div><strong id="line-count">00</strong><span>Source lines</span></div>
         <div><strong id="ready-count">00</strong><span>Ready for analysis</span></div>
-        <p>Original text is preserved. <br>Cited extracts and source validation available.</p>
+        <p>Original text is preserved. <br>Analysis and audit are not connected.</p>
       </div>
       <section class="upload-section" id="upload" aria-labelledby="add-heading">
         <div class="section-heading">
@@ -107,19 +107,18 @@
       <section class="handoff" id="handoff" aria-labelledby="handoff-heading">
         <div class="handoff-copy">
           <h2 id="handoff-heading"><span class="section-number">03</span> Prepare analysis</h2>
-          <p>Choose an application and run analysis on the loaded documents.</p>
-          <p class="muted">Extractive baseline. Review evidence and requirements manually.</p>
+          <p>Choose an application and download its source documents for the Analysis Agent.</p>
+          <p class="muted">Generated results and citation verification are not available yet.</p>
         </div>
         <div class="handoff-controls">
           <div class="task-switch" aria-label="Analysis application">
             <button id="brief-task" aria-pressed="true">Brief Generator</button>
             <button id="requirements-task" aria-pressed="false">Requirements Checker</button>
           </div>
-          <label for="requirements-input">Requirements (one per line, required for Requirements Checker)</label><textarea id="requirements-input" rows="4" maxlength="200000"></textarea><p id="task-description">Prepare documents for a cited brief.</p>
-          <button class="text-button" id="request-button" disabled>Run analysis</button>
+          <p id="task-description">Prepare documents for a cited brief.</p>
+          <button class="text-button" id="request-button" disabled>Download analysis request</button>
         </div>
       </section>
-      <section id="analysis-results" aria-live="polite" hidden></section>
       <footer><span>iContinuum / Unissant Challenge X</span><span>Local proof of concept</span></footer>
     </main>
   </div>

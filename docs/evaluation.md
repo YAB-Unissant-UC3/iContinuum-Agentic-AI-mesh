@@ -1,18 +1,3 @@
-> Local integration update: the three agents are connected through
-> `backend/analysis.py` and `/api/analysis`. Run `python -m backend` and open
-> http://127.0.0.1:8000. The existing workspace now runs analysis, displays source
-> citations and audit status, and exports audited results. Requirements Checker
-> needs explicit requirements (one per line). Matching is lexical and every
-> requirement remains `unclear` pending human review. Briefs are exact extracts;
-> semantic summaries and conflict detection are not implemented. Audits validate
-> provenance against submitted text, not its truth. Audit events are returned
-> in memory; authentication and persistent storage are not implemented.
->
-> `mesh/` contains the shared agents. The reader contract is validated before
-> analysis, including content fingerprints and original lines. The older planning
-> and availability descriptions below describe the upstream prototype before
-> this integration and are retained for reference.
-
 # Test data and evaluation notes
 
 Use these notes when presenting the PoC. Describe extraction tests separately

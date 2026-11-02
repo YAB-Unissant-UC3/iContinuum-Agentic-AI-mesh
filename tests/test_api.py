@@ -48,7 +48,7 @@ class WorkspaceAPITests(unittest.TestCase):
     def test_health_reports_real_agent_availability(self):
         status, result, _ = self.request("GET", "/api/health")
         self.assertEqual(status, 200)
-        self.assertEqual(result["agents"], {"reader": "ready", "analysis": "ready", "audit": "ready"})
+        self.assertEqual(result["agents"], {"reader": "ready", "analysis": "not_connected", "audit": "not_connected"})
 
     def test_upload_preserves_bytes_lines_and_identity(self):
         raw = "\ufeffCaf\u00e9\r\n\r\n  Original text  \n".encode("utf-8")
@@ -139,16 +139,16 @@ class WorkspaceAPITests(unittest.TestCase):
                 self.assertEqual(status, expected_status)
                 self.assertEqual(result["error"]["code"], code)
 
-    def test_analysis_returns_audited_extracts_for_both_tasks(self):
+    def test_analysis_is_explicitly_unavailable_without_fake_results(self):
         _, demo, _ = self.request("GET", "/api/demo")
         for task in ("brief", "requirements"):
             with self.subTest(task=task):
                 status, result, _ = self.request("POST", "/api/analysis", {
-                    "api_version": "1.0", "task": task, "documents": demo["documents"], "requirements": ["audit retention"],
+                    "api_version": "1.0", "task": task, "documents": demo["documents"],
                 })
-                self.assertEqual(status, 200)
-                self.assertEqual(result["audit"]["status"], "passed")
-                self.assertIn("claims", result)
+                self.assertEqual(status, 501)
+                self.assertEqual(result["error"]["code"], "analysis_not_connected")
+                self.assertNotIn("claims", result)
 
     def test_analysis_request_checks_top_level_fields(self):
         for task in (None, "unknown", [], {}):

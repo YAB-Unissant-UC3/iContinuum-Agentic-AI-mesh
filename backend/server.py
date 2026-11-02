@@ -1,15 +1,5 @@
 """Small, localhost-only development server. No third-party dependencies."""
 
-# Support an IDE's "Run Python File" as well as `python -m backend`.
-if __name__ == "__main__" and not __package__:
-    import runpy
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    runpy.run_module("backend", run_name="__main__")
-    sys.exit(0)
-
 import base64
 import binascii
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -80,8 +70,6 @@ def _read_uploads(payload):
 
 
 class WorkspaceHandler(BaseHTTPRequestHandler):
-    server: ThreadingHTTPServer
-
     # HTTP/1.0 closes connections after each response, including rejected bodies.
     server_version = "iContinuumLocal/1.0"
 
@@ -133,7 +121,7 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             if path == "/api/health":
                 self._json(200, {
                     "api_version": "1.0", "status": "ok",
-                    "agents": {"reader": "ready", "analysis": "ready", "audit": "ready"},
+                    "agents": {"reader": "ready", "analysis": "not_connected", "audit": "not_connected"},
                     "limits": {"max_files": MAX_FILES, "max_file_bytes": MAX_FILE_BYTES,
                                "max_total_bytes": MAX_TOTAL_BYTES, "max_lines_per_file": MAX_LINES_PER_FILE},
                 })
@@ -198,8 +186,6 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     result = analyze_documents(payload)
                 except AnalysisUnavailable as exc:
                     raise RequestError("analysis_not_connected", str(exc), 501)
-                except ValueError as exc:
-                    raise RequestError("invalid_analysis", str(exc))
                 # The real agent and its output validation will be integrated together.
                 self._json(200, result)
         except RequestError as exc:
