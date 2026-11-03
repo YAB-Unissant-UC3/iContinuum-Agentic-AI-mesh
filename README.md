@@ -1,6 +1,6 @@
 # iContinuum-Agentic-AI-mesh
 
-Proof of concept for the Unissant Challenge X. Three specialized agents will
+Proof of concept for our Unissant Challenge X UC2 Project. Three specialized agents will
 share evidence through a Python backend for a Brief Generator and a Requirements
 Checker:
 
