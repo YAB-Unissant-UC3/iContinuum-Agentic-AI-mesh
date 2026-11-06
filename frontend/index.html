@@ -16,26 +16,38 @@
     <nav class="workspace-nav" aria-label="Workspace sections">
       <a href="#upload"><span>01</span> Upload documents</a>
       <a href="#sources"><span>02</span> Read sources</a>
-      <a href="#handoff"><span>03</span> Prepare analysis</a>
+      <a href="#handoff"><span>03</span> Run analysis</a>
     </nav>
     <h2 class="sidebar-section">Agent status</h2>
     <ol class="agent-list">
       <li><span class="agent-number ready">01</span><div><strong>Document Reader</strong><small id="reader-status">Checking connection...</small></div></li>
-      <li><span class="agent-number">02</span><div><strong>Analysis Agent</strong><small>Not connected</small></div></li>
-      <li><span class="agent-number">03</span><div><strong>Audit Agent</strong><small>Not connected</small></div></li>
+      <li><span class="agent-number">02</span><div><strong>Analysis Agent</strong><small id="analysis-status">Checking connection...</small></div></li>
+      <li><span class="agent-number">03</span><div><strong>Audit Agent</strong><small id="audit-agent-status">Checking connection...</small></div></li>
     </ol>
-    <div class="sidebar-note"><span class="tiny-label">Local storage</span><p>Files stay in memory.<br>Refreshing clears this workspace.</p></div>
+    <div class="sidebar-note"><span class="tiny-label">Local demo</span><p>Uploads and results stay in server memory until restart. Audit records are saved locally.</p></div>
     <div class="local-note">Local prototype <span>v0.2</span></div>
   </aside>
   <div class="page">
     <header class="topbar">
       <span>Unissant Challenge X</span>
+      <span id="signed-in-user">Signed out</span>
+      <button class="text-button" id="logout-button" hidden>Sign out</button>
       <a class="connection" href="/api/health" target="_blank" rel="noopener" aria-label="Reader connection status; opens API status in a new tab">
         <span class="status-dot" id="connection-dot" aria-hidden="true"></span>
         <span id="connection-label">Connecting</span>
       </a>
     </header>
     <main id="main">
+      <section class="session-panel" id="session-panel" aria-labelledby="login-heading">
+        <h2 id="login-heading">Sign in to the synthetic demo</h2>
+        <form id="login-form" class="auth-form">
+          <label>Username<input id="username" name="username" autocomplete="username" required maxlength="64"></label>
+          <label>Password<input id="password" name="password" type="password" autocomplete="current-password" required maxlength="128"></label>
+          <button class="button primary" id="login-button" type="submit">Sign in</button>
+        </form>
+        <p class="muted">Demo accounts: analyst / AnalystDemo!2026 and manager / ManagerDemo!2026. Synthetic data only.</p>
+      </section>
+      <p class="mode-banner" id="mode-banner">Deterministic demo mode (no LLM). Live generation is disabled unless explicitly configured.</p>
       <div class="page-heading">
         <div>
           <p class="eyebrow">Document Reader</p>
@@ -48,7 +60,7 @@
         <div><strong id="document-count">00</strong><span>Documents</span></div>
         <div><strong id="line-count">00</strong><span>Source lines</span></div>
         <div><strong id="ready-count">00</strong><span>Ready for analysis</span></div>
-        <p>Original text is preserved. <br>Analysis and audit are not connected.</p>
+        <p>Original text is preserved. <br>Every analysis is audited before human review.</p>
       </div>
       <section class="upload-section" id="upload" aria-labelledby="add-heading">
         <div class="section-heading">
@@ -64,9 +76,12 @@
           <input id="file-input" type="file" accept=".txt,text/plain" multiple hidden>
         </div>
         <div class="demo-row">
-          <button class="text-button" id="demo-button">Load 3 fictional documents</button>
+          <button class="text-button" id="demo-button">Load accessible fictional documents</button>
           <span class="demo-detail">The sample set includes conflicting retention statements.</span>
         </div>
+        <label class="access-field" id="upload-access-label" hidden>Access for new uploads
+          <select id="upload-access"><option value="public">Standard: uploader and Managers</option><option value="restricted">Restricted: Manager only</option></select>
+        </label>
       </section>
       <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
       <section class="review-section" id="sources" aria-labelledby="review-heading">
@@ -106,9 +121,9 @@
       </section>
       <section class="handoff" id="handoff" aria-labelledby="handoff-heading">
         <div class="handoff-copy">
-          <h2 id="handoff-heading"><span class="section-number">03</span> Prepare analysis</h2>
-          <p>Choose an application and download its source documents for the Analysis Agent.</p>
-          <p class="muted">Generated results and citation verification are not available yet.</p>
+          <h2 id="handoff-heading"><span class="section-number">03</span> Run analysis</h2>
+          <p>Run an audited analysis of the readable documents in this workspace.</p>
+          <p class="muted">Word matches do not establish compliance. A Manager records the final review.</p>
         </div>
         <div class="handoff-controls">
           <div class="task-switch" aria-label="Analysis application">
@@ -116,8 +131,34 @@
             <button id="requirements-task" aria-pressed="false">Requirements Checker</button>
           </div>
           <p id="task-description">Prepare documents for a cited brief.</p>
+          <label id="requirements-label" class="requirements-field" hidden>Requirements to look for (one per line)
+            <textarea id="requirements-input" rows="3" maxlength="10000">audit records
+quantum encryption</textarea>
+          </label>
+          <button class="button primary" id="run-button" disabled>Run analysis</button>
           <button class="text-button" id="request-button" disabled>Download analysis request</button>
         </div>
+      </section>
+      <section class="analysis-history" aria-labelledby="history-heading">
+        <h2 id="history-heading">Saved runs in this server session</h2>
+        <div class="history-controls"><select id="analysis-history" aria-label="Select an analysis run"><option value="">No accessible runs</option></select>
+          <button class="button secondary" id="load-run-button" disabled>Open result</button>
+          <button class="text-button" id="refresh-runs-button" disabled>Refresh runs</button></div>
+      </section>
+      <section class="analysis-result" id="analysis-result" aria-labelledby="result-heading" hidden>
+        <div class="section-heading"><h2 id="result-heading">Analysis result</h2><button class="button secondary" id="result-download">Download result JSON</button></div>
+        <p id="result-meta" class="muted"></p>
+        <p id="result-status" class="result-status" role="status"></p>
+        <div id="result-content"></div>
+        <div class="human-review" id="manager-review" hidden>
+          <h3>Manager review</h3><p>Check each claim against its cited sources before approving. Approval records a human decision; automated audit warnings and failures are retained. Source conflicts are not resolved automatically.</p>
+          <label>Review note<textarea id="review-comment" rows="2" maxlength="1000" placeholder="Explain your decision"></textarea></label>
+          <button class="button primary" id="approve-button">Approve</button>
+          <button class="button secondary" id="reject-button">Reject</button>
+        </div>
+        <p id="review-readonly" class="muted">A Manager must approve or reject this result.</p>
+        <button class="text-button" id="trail-button">Show audit trail</button>
+        <pre class="trail-preview" id="audit-trail" hidden></pre>
       </section>
       <footer><span>iContinuum / Unissant Challenge X</span><span>Local proof of concept</span></footer>
     </main>

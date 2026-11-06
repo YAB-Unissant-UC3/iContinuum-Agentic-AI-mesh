@@ -1,0 +1,8 @@
+{
+  "documents": [
+    {"path": "project_brief.txt", "allowed_roles": ["analyst", "manager"]},
+    {"path": "requirements.txt", "allowed_roles": ["analyst", "manager"]},
+    {"path": "meeting_notes.txt", "allowed_roles": ["analyst", "manager"]},
+    {"path": "restricted/manager_notes.txt", "allowed_roles": ["manager"]}
+  ]
+}

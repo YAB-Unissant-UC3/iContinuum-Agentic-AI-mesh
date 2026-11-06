@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from threading import Thread
 import unittest
+import tempfile
 
 from backend.server import create_server, MAX_FILE_BYTES, MAX_REQUEST_BYTES
 from document_reader import read_document
@@ -22,7 +23,8 @@ def upload(name="document.txt", data=b"First\r\n\r\nLast\n"):
 class WorkspaceAPITests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.server = create_server(0)
+        cls.runtime = tempfile.TemporaryDirectory()
+        cls.server = create_server(0, data_dir=cls.runtime.name)
         cls.thread = Thread(target=cls.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         cls.thread.start()
 
@@ -31,6 +33,13 @@ class WorkspaceAPITests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join(timeout=5)
+        cls.runtime.cleanup()
+
+    def setUp(self):
+        self.session_cookie = None
+        status, _, response = self.request("POST", "/api/login", {"username": "analyst", "password": "AnalystDemo!2026"})
+        self.assertEqual(status, 200)
+        self.session_cookie = response.getheader("Set-Cookie").split(";", 1)[0]
 
     def request(self, method, path, payload=None, headers=None, raw_body=None):
         connection = HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=5)
@@ -38,6 +47,8 @@ class WorkspaceAPITests(unittest.TestCase):
         body = json.dumps(payload) if raw_body is None and payload is not None else raw_body
         request_headers = {"Content-Type": "application/json"} if body is not None else {}
         request_headers.update(headers or {})
+        if self.session_cookie:
+            request_headers.setdefault("Cookie", self.session_cookie)
         connection.request(method, path, body=body, headers=request_headers)
         response = connection.getresponse()
         data = response.read()
@@ -48,7 +59,7 @@ class WorkspaceAPITests(unittest.TestCase):
     def test_health_reports_real_agent_availability(self):
         status, result, _ = self.request("GET", "/api/health")
         self.assertEqual(status, 200)
-        self.assertEqual(result["agents"], {"reader": "ready", "analysis": "not_connected", "audit": "not_connected"})
+        self.assertEqual(result["agents"], {"reader": "ready", "analysis": "deterministic_demo", "audit": "ready"})
 
     def test_upload_preserves_bytes_lines_and_identity(self):
         raw = "\ufeffCaf\u00e9\r\n\r\n  Original text  \n".encode("utf-8")
@@ -122,7 +133,8 @@ class WorkspaceAPITests(unittest.TestCase):
                 status, result, _ = self.request("POST", "/api/documents", raw_body=body)
                 self.assertEqual(status, 400)
                 self.assertEqual(result["error"]["code"], "invalid_json")
-        status, result, _ = self.request("POST", "/api/documents", {}, {"Content-Type": "text/plain"})
+        # Media type is rejected before body parsing; no payload is necessary.
+        status, result, _ = self.request("POST", "/api/documents", headers={"Content-Type": "text/plain"}, raw_body="")
         self.assertEqual(status, 415)
         self.assertEqual(result["error"]["code"], "unsupported_media_type")
 
@@ -135,20 +147,27 @@ class WorkspaceAPITests(unittest.TestCase):
         ]
         for headers, expected_status, code in cases:
             with self.subTest(code=code):
-                status, result, _ = self.request("POST", "/api/documents", {}, headers)
+                # These headers are rejected before body parsing. Send no late
+                # body bytes that could race the early close on Windows.
+                status, result, _ = self.request("POST", "/api/documents", headers=headers, raw_body="")
                 self.assertEqual(status, expected_status)
                 self.assertEqual(result["error"]["code"], code)
 
-    def test_analysis_is_explicitly_unavailable_without_fake_results(self):
+    def test_analysis_uses_labeled_deterministic_mode(self):
         _, demo, _ = self.request("GET", "/api/demo")
         for task in ("brief", "requirements"):
             with self.subTest(task=task):
                 status, result, _ = self.request("POST", "/api/analysis", {
                     "api_version": "1.0", "task": task, "documents": demo["documents"],
+                    "requirements": ["audit records"],
                 })
-                self.assertEqual(status, 501)
-                self.assertEqual(result["error"]["code"], "analysis_not_connected")
-                self.assertNotIn("claims", result)
+                self.assertEqual(status, 200)
+                self.assertEqual(result["mode"], "deterministic_demo")
+                self.assertTrue(result["claims"])
+                self.assertEqual(result["audit"]["status"], "passed")
+                self.assertEqual(result["audit_event"]["analysis_id"], result["analysis_id"])
+                if task == "requirements":
+                    self.assertTrue(result["contradictions"])
 
     def test_analysis_request_checks_top_level_fields(self):
         for task in (None, "unknown", [], {}):

@@ -1,7 +1,7 @@
 # Test data and evaluation notes
 
 Use these notes when presenting the PoC. Describe extraction tests separately
-from future analysis and audit quality. The organizers have not supplied a
+from general semantic analysis quality. The organizers have not supplied a
 common dataset or answer key; these fixtures and expected locations are ours.
 
 ## Data
@@ -11,15 +11,20 @@ document review pilot. Each contains 10 source lines, for 30 lines in total.
 They contain no real customer records. The `sample_documents/` folder holds the
 exact files used by the demo.
 
+A fourth synthetic file, `restricted/manager_notes.txt`, adds seven lines of
+Manager-only evidence. The manifest grants access before source text is returned.
+Original public files and their expected citation locations are unchanged.
+
 | Document | Intended evidence |
 | --- | --- |
 | `project_brief.txt` | Shared backend, plain-text scope, launch date, local operation |
 | `requirements.txt` | Seven requirements; line 9 requires 30-day audit retention |
 | `meeting_notes.txt` | Line 8 requests 90-day audit retention; line 9 notes it is unresolved |
+| `restricted/manager_notes.txt` | Manager-only synthetic planning code and fictional budget |
 
-The retention disagreement is a future Analysis Agent test case. Loading these
-files currently shows the original statements; it does not detect or resolve
-their disagreement automatically.
+The deterministic Requirements Checker flags the 30-day/90-day disagreement
+and cites the two original lines. It does not resolve the disagreement or infer
+general compliance. Requirement outcomes remain `unclear`.
 
 ## Current evaluation method
 
@@ -36,7 +41,11 @@ Unicode and UTF-8 marks, empty/unreadable files, and command-line output.
 API tests start a real HTTP server on a temporary loopback port and verify
 uploads, source identity across disk and API reads, mixed successful and failed
 documents, request validation, limits, same-origin handling, static routes,
-and the explicit unavailable response for the unconnected Analysis Agent.
+and both integrated analysis modes. Additional tests exercise fabricated claims,
+invalid references, altered evidence, session expiry, direct API restrictions,
+role spoofing, restricted-result isolation, Manager review, log persistence, and
+sample-manifest replacement. Static file routes cannot serve restricted inputs
+or runtime audit files.
 Tests do not call an LLM or external API.
 
 Report the test runner's actual test count and pass/fail output for the revision
@@ -53,10 +62,25 @@ clearing. Desktop and 390-pixel layouts were inspected, with no page overflow
 at the narrow size and no browser errors during that run. This is local
 functional verification, not cross-browser or accessibility certification.
 
+Gemini Phase 1 verification: **88 Python tests passed**, including 25 new
+Gemini-specific mocked tests, plus JavaScript syntax checks and the mocked
+Chrome workflow. No real Gemini generation or project-eligibility request was
+made. These checks establish integration behavior and failure handling, not
+live model accuracy, latency, or a measured claim-support score. The broader
+[Phase 2 evaluation suite](phase2-plan.md) remains unimplemented.
+
+Full-workflow verification on November 5, 2026: **63 Python tests passed** using
+Python 3.13.16, with JavaScript syntax and the full Chrome browser workflow also
+passing. Reproduce it with the commands above. The optional
+`node tests/browser_smoke.mjs` check covers login, uploads, both analyses,
+citations, clipboard, downloads, Manager approve/reject, audit records,
+logout clearing, direct restricted API denial, and page widths of 320, 390,
+and 768 pixels. See [the demo guide](demo-guide.md) for setup and credentials.
+
 ## Manual browser checklist
 
 1. Start `python -m backend` and open `http://127.0.0.1:8000`.
-2. Load the examples: expect 3 documents, 30 source lines, and 3 ready for handoff.
+2. Sign in as Analyst and load examples: expect 3 documents and 30 source lines.
 3. Select requirements line 9 and meeting notes line 8; compare their statements.
 4. Copy a citation and verify its ID and inclusive line range against JSON.
 5. Shift-click two source lines to select and copy a citation range.
@@ -65,9 +89,13 @@ functional verification, not cross-browser or accessibility certification.
    empty/error states. A failed file must not enter the analysis handoff.
 8. Download reader JSON, then select each application and download its analysis
    request. Verify `task` is `brief` or `requirements` as selected.
-9. Remove a document, clear the workspace, and refresh; no uploads should remain.
+9. Remove a document, clear the page, and refresh. The page should clear; saved
+   runs remain on the server and can be reopened until restart. Sign-out must
+   clear displayed source text and results.
 10. Check keyboard navigation and a narrow screen. File names and contents
     should be displayed as text, including strings resembling HTML.
+
+For the complete ten-minute authenticated scenario, follow the demo guide.
 
 ## Assumptions and limitations
 
@@ -77,10 +105,11 @@ functional verification, not cross-browser or accessibility certification.
 - IDs identify exact bytes. Git line-ending conversion or edits can create a
   new version ID. The example line numbers stay the same with CRLF or LF.
 - The HTTP prototype has documented upload limits and runs only locally. Data
-  is held in memory, with no database, authentication, or saved workspaces.
-- The browser displays source references; it does not judge whether a claim
-  is supported. Analysis and Audit Agent quality remain unevaluated until
-  those agents are integrated.
+  is held in memory, with demo authentication and saved runs until restart.
+  Metadata audit events persist in an ignored JSONL file; there is no database.
+- Audit verifies exact single-line extracts and supported retention rules,
+  not general semantic truth. Conflict rules cover explicit retention durations;
+  different contexts may still produce false positives or missed conflicts.
 - No latency, concurrency, security certification, model accuracy, requirement
   recall, or contradiction-detection score is claimed by these automated tests.
 
