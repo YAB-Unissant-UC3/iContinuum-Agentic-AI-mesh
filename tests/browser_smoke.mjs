@@ -9,7 +9,8 @@ import assert from 'node:assert/strict';
 const origin = process.argv[2] || 'http://127.0.0.1:8000';
 const mockedGemini = process.argv.includes('--mock-gemini');
 const mockedGroq = process.argv.includes('--mock-groq');
-const mockedAI = mockedGemini || mockedGroq;
+const mockedFallback = process.argv.includes('--mock-fallback');
+const mockedAI = (mockedGemini || mockedGroq) && !mockedFallback;
 if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(origin)) throw new Error('Use a local demo URL.');
 const scratch = await mkdtemp(path.join(tmpdir(), 'icontinuum-full-browser-'));
 const profile = path.join(scratch, 'profile'), downloads = path.join(scratch, 'downloads');
@@ -41,9 +42,41 @@ async function waitFor(expression) {
   throw new Error(`Condition failed: ${expression}`);
 }
 async function click(id) { await evaluate(`document.getElementById(${JSON.stringify(id)}).click()`); }
+async function assertIdentity(name) {
+  const identity = await evaluate(`({
+    role: state.user?.role, label: document.getElementById('signed-in-user').textContent,
+    username: document.getElementById('session-username').textContent,
+    visible: !document.getElementById('session-identity').hidden,
+    analyst: getComputedStyle(document.getElementById('analyst-icon')).display !== 'none',
+    manager: getComputedStyle(document.getElementById('manager-icon')).display !== 'none',
+    signout: !document.getElementById('logout-button').hidden,
+    signoutName: document.getElementById('logout-button').getAttribute('aria-label')
+  })`);
+  assert.equal(identity.role, name);
+  assert.equal(identity.label, name === 'manager' ? 'Manager' : 'Analyst');
+  assert.equal(identity.username, name);
+  assert.equal(identity.visible, true);
+  assert.equal(identity.analyst, name === 'analyst');
+  assert.equal(identity.manager, name === 'manager');
+  assert.equal(identity.signout, true);
+  assert.match(identity.signoutName, /sign out/i);
+}
+async function assertMobileIdentity(name) {
+  for (const width of [390, 320, 768]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: true });
+    await evaluate('window.scrollTo(0, document.body.scrollHeight)');
+    await assertIdentity(name);
+    assert.ok(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), `Page overflow at ${width}px`);
+    assert.ok(await evaluate(`(() => {
+      const box = document.getElementById('session-identity').getBoundingClientRect();
+      return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight;
+    })()`), `Session identity not visible at ${width}px`);
+  }
+}
 async function login(name, password) {
   await evaluate(`document.getElementById('username').value=${JSON.stringify(name)}; document.getElementById('password').value=${JSON.stringify(password)}; document.getElementById('login-form').requestSubmit()`);
-  await waitFor(`document.getElementById('signed-in-user').textContent === '${name} / ${name}' && !state.busy`);
+  await waitFor(`state.user?.role === '${name}' && !state.busy`);
+  await assertIdentity(name);
 }
 async function run(task) {
   await click(`${task}-task`);
@@ -55,6 +88,13 @@ async function run(task) {
     assert.equal(await evaluate('state.result.mode'), mockedGroq ? 'groq' : 'gemini');
     assert.equal(await evaluate('state.result.provider'), mockedGroq ? 'groq' : 'gemini');
   }
+  assert.equal(await evaluate(`document.getElementById('result-kind').dataset.generation`), mockedAI && task === 'brief' ? 'ai' : 'deterministic');
+  assert.match(await evaluate(`document.getElementById('result-kind').textContent`), mockedAI && task === 'brief' ? /AI-generated draft/ : /no AI-generated text/);
+  if (mockedFallback && task === 'brief') {
+    assert.equal(await evaluate('state.result.fallback_reason'), 'provider_unavailable');
+    assert.match(await evaluate(`document.getElementById('result-kind').textContent`), /Deterministic fallback/);
+  }
+  await assertIdentity(await evaluate('state.user.role'));
   return evaluate('state.result.analysis_id');
 }
 async function upload(files) {
@@ -63,8 +103,8 @@ async function upload(files) {
   await send('DOM.setFileInputFiles', { nodeId, files });
   await waitFor('!state.busy');
 }
-async function screenshot(name) {
-  const { data } = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
+async function screenshot(name, fullPage = true) {
+  const { data } = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: fullPage });
   const filename = path.join(scratch, name); await writeFile(filename, Buffer.from(data, 'base64')); console.log(filename);
 }
 async function downloaded(prefix) {
@@ -98,11 +138,20 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: origin });
   await waitFor(`document.getElementById('connection-label')?.textContent === 'Reader connected' && !document.getElementById('login-button').disabled`);
+  assert.ok(await evaluate(`document.fonts.ready.then(() => ['DM Serif Display', 'Manrope'].every(
+    family => Array.from(document.fonts).some(font => font.family.replace(/["']/g, '') === family && font.status === 'loaded')))`), 'Local editorial fonts did not load');
+  assert.ok(await evaluate(`performance.getEntriesByType('resource').every(resource => new URL(resource.name).origin === location.origin)`), 'Workspace must not require external font services');
   assert.equal(await evaluate(`document.getElementById('browse-button').disabled`), true);
   await login('analyst', 'AnalystDemo!2026');
+  // The authenticated session, rather than a local role selector, survives reload.
+  await send('Page.reload');
+  await waitFor(`typeof state !== 'undefined' && state.user?.role === 'analyst' && !state.busy && !document.getElementById('login-button').disabled`);
+  await assertIdentity('analyst');
   await click('demo-button');
   await waitFor(`document.getElementById('document-count').textContent === '03' && !state.busy`);
   assert.equal(await evaluate(`document.getElementById('line-count').textContent`), '30');
+  await evaluate('window.scrollTo(0, 0)');
+  await screenshot('workspace-desktop.png', false);
   const briefRun = await run('brief');
   assert.ok(await evaluate('state.result.claims.length > 0'));
   await evaluate(`document.querySelector('.result-citation').click()`);
@@ -128,6 +177,8 @@ try {
   await click('logout-button'); await waitFor('!state.user && !state.busy');
   assert.equal(await evaluate('state.documents.length'), 0);
   assert.equal(await evaluate(`document.getElementById('result-content').textContent`), '');
+  assert.equal(await evaluate(`document.getElementById('session-identity').hidden`), true);
+  assert.equal(await evaluate(`document.getElementById('session-username').textContent`), '');
   await login('manager', 'ManagerDemo!2026');
   const reviewRun = mockedAI ? briefRun : requirementsRun;
   await evaluate(`document.getElementById('analysis-history').value=${JSON.stringify(reviewRun)}; document.getElementById('analysis-history').dispatchEvent(new Event('change'))`);
@@ -141,6 +192,11 @@ try {
   await evaluate(`document.getElementById('review-comment').value='Rejected pending reconciliation of retention periods.'`);
   await click('reject-button'); await waitFor(`state.result.review.status === 'rejected' && !state.busy`);
   await screenshot('manager-review.png');
+  await assertMobileIdentity('manager');
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await evaluate('window.scrollTo(0, document.body.scrollHeight)');
+  await screenshot('manager-mobile.png', false);
+  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
   await click('clear-button'); await click('demo-button'); await waitFor('state.documents.length === 4 && !state.busy');
   const restrictedId = await evaluate(`state.documents.find(d => d.access === 'restricted').document_id`);
   await evaluate(`for (let i=0;i<3;i++) document.querySelector('.remove-document').click()`);
@@ -153,10 +209,7 @@ try {
     const denied = await evaluate(`fetch(${JSON.stringify(route)}).then(async r => ({status:r.status,body:await r.text()}))`);
     assert.equal(denied.status, 403); assert.ok(!denied.body.includes('CEDAR-DEMO-742'));
   }
-  for (const width of [390, 320, 768]) {
-    await send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: true });
-    assert.ok(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), `Page overflow at ${width}px`);
-  }
+  await assertMobileIdentity('analyst');
   await screenshot('narrow-layout.png');
   assert.deepEqual(errors, []);
   console.log('PASS: login, examples, uploads, extracts, conflicts, source links, clipboard, downloads, audit trail, Manager approve/reject, logout clearing, direct restricted API denial, and responsive layouts.');

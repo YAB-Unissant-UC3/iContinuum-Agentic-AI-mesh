@@ -95,7 +95,7 @@ function renderViewer() {
   $('viewer-empty').hidden = Boolean(source && (state.view === 'json' || hasLines));
   const title = $('viewer-empty').querySelector('h3');
   const description = $('viewer-empty').querySelector('h3 + p');
-  title.textContent = source?.status === 'error' ? 'This document could not be read.' : source?.status === 'empty' ? 'This document is empty.' : 'No source selected.';
+  title.textContent = source?.status === 'error' ? 'This document could not be read.' : source?.status === 'empty' ? 'This document is empty.' : 'Your evidence starts here.';
   description.textContent = source?.error?.message || (source?.status === 'empty' ? 'The file has a stable ID, but contains no source lines.' : 'Upload a text file or load the sample documents to view numbered lines.');
   $('source-tab').setAttribute('aria-pressed', String(state.view === 'source'));
   $('json-tab').setAttribute('aria-pressed', String(state.view === 'json'));
@@ -278,7 +278,15 @@ function setUser(user) {
   state.view = 'source';
   $('session-panel').hidden = Boolean(user);
   $('logout-button').hidden = !user;
-  $('signed-in-user').textContent = user ? `${user.username} / ${user.role}` : 'Signed out';
+  // Presentation only: the role comes from the authenticated API response.
+  // Existing server permissions remain authoritative for every request.
+  $('session-identity').hidden = !user;
+  $('signed-out-label').hidden = Boolean(user);
+  $('signed-in-user').textContent = user?.role === 'manager' ? 'Manager'
+    : user?.role === 'analyst' ? 'Analyst' : user ? 'Authenticated user' : 'Signed out';
+  $('session-username').textContent = user?.username || '';
+  $('analyst-icon').toggleAttribute('hidden', user?.role !== 'analyst');
+  $('manager-icon').toggleAttribute('hidden', user?.role !== 'manager');
   $('upload-access-label').hidden = user?.role !== 'manager';
   $('upload-access').value = 'public';
   $('review-comment').value = '';
@@ -341,11 +349,18 @@ function renderResult() {
   $('audit-trail').hidden = true; $('audit-trail').textContent = '';
   $('result-meta').textContent = '';
   $('result-status').textContent = '';
+  $('result-kind').textContent = '';
+  $('result-kind').removeAttribute('data-generation');
   $('review-comment').value = '';
   $('manager-review').hidden = !result || state.user?.role !== 'manager';
   $('review-readonly').hidden = state.user?.role === 'manager';
   if (!result) return;
   const generated = ['gemini', 'groq'].includes(result.mode);
+  $('result-kind').dataset.generation = generated ? 'ai' : 'deterministic';
+  $('result-kind').textContent = generated
+    ? 'AI-generated draft / source review required'
+    : result.fallback_reason ? 'Deterministic fallback / no AI-generated text'
+      : 'Deterministic demo / no AI-generated text';
   $('result-heading').textContent = result.task === 'brief' ? (generated ? `Project brief: ${result.mode === 'groq' ? 'Groq' : 'Gemini'} draft` : 'Brief: cited source extracts') : 'Requirements: evidence and potential conflicts';
   $('result-meta').textContent = `${result.mode_label}${result.model ? ` / ${result.model}` : ''} / ${result.analysis_id}${result.fallback_reason ? ` / fallback: ${result.fallback_reason}` : ''}`;
   $('result-status').textContent = `Automated audit: ${result.audit.status}. Human review: ${result.review.status}.${result.review.comment ? ` Note: ${result.review.comment}` : ''}`;

@@ -61,6 +61,20 @@ class WorkspaceAPITests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(result["agents"], {"reader": "ready", "analysis": "deterministic_demo", "audit": "ready"})
 
+    def test_local_fonts_preserve_static_allowlist_and_security_policy(self):
+        self.session_cookie = None
+        for name in ("dm-serif-display-latin", "manrope-latin"):
+            with self.subTest(font=name):
+                status, body, response = self.request("GET", "/fonts/" + name + ".woff2")
+                self.assertEqual(status, 200)
+                self.assertEqual(response.getheader("Content-Type"), "font/woff2")
+                self.assertTrue(body.startswith(b"wOF2"))
+                policy = response.getheader("Content-Security-Policy")
+                self.assertIn("default-src 'self'", policy)
+                self.assertIn("style-src 'self'", policy)
+        for route in ("/fonts/unknown.woff2", "/fonts/../backend/groq.py"):
+            self.assertEqual(self.request("GET", route)[0], 404)
+
     def test_upload_preserves_bytes_lines_and_identity(self):
         raw = "\ufeffCaf\u00e9\r\n\r\n  Original text  \n".encode("utf-8")
         status, result, _ = self.request("POST", "/api/documents", {"files": [upload(data=raw)]})

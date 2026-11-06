@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="A local document workspace for source-supported review.">
   <title>Document workspace | iContinuum</title>
+  <link rel="preload" href="/fonts/dm-serif-display-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" defer></script>
 </head>
@@ -12,33 +14,54 @@
   <a class="skip-link" href="#main">Skip to workspace</a>
   <aside class="sidebar">
     <a class="brand" href="/" aria-label="iContinuum home">iContinuum</a>
-    <p class="workspace-label">Document review / PoC</p>
+    <p class="workspace-label">Agentic AI Mesh<br>Evidence &amp; review workspace</p>
     <nav class="workspace-nav" aria-label="Workspace sections">
       <a href="#upload"><span>01</span> Upload documents</a>
       <a href="#sources"><span>02</span> Read sources</a>
       <a href="#handoff"><span>03</span> Run analysis</a>
+      <a href="#history"><span>04</span> Review &amp; audit</a>
     </nav>
-    <h2 class="sidebar-section">Agent status</h2>
+    <h2 class="sidebar-section">The shared workflow</h2>
     <ol class="agent-list">
-      <li><span class="agent-number ready">01</span><div><strong>Document Reader</strong><small id="reader-status">Checking connection...</small></div></li>
-      <li><span class="agent-number">02</span><div><strong>Analysis Agent</strong><small id="analysis-status">Checking connection...</small></div></li>
-      <li><span class="agent-number">03</span><div><strong>Audit Agent</strong><small id="audit-agent-status">Checking connection...</small></div></li>
+      <li><span class="agent-number ready">01</span><div><strong>Reader</strong><p>Preserves text and source lines.</p><small id="reader-status">Checking connection...</small></div></li>
+      <li><span class="agent-number">02</span><div><strong>Analysis</strong><p>Builds a brief or checks evidence.</p><small id="analysis-status">Checking connection...</small></div></li>
+      <li><span class="agent-number">03</span><div><strong>Audit</strong><p>Checks citations; flags concerns.</p><small id="audit-agent-status">Checking connection...</small></div></li>
     </ol>
     <div class="sidebar-note"><span class="tiny-label">Local demo</span><p>Uploads and results stay in server memory until restart. Audit records are saved locally.</p></div>
     <div class="local-note">Local prototype <span>v0.2</span></div>
   </aside>
   <div class="page">
     <header class="topbar">
-      <span>Unissant Challenge X</span>
-      <span id="signed-in-user">Signed out</span>
-      <button class="text-button" id="logout-button" hidden>Sign out</button>
+      <span class="edition-label">Unissant Challenge X <span>/ UC2</span></span>
       <a class="connection" href="/api/health" target="_blank" rel="noopener" aria-label="Reader connection status; opens API status in a new tab">
         <span class="status-dot" id="connection-dot" aria-hidden="true"></span>
         <span id="connection-label">Connecting</span>
       </a>
+      <div class="session-identity" id="session-identity" hidden aria-label="Authenticated session">
+        <span class="role-avatar" aria-hidden="true">
+          <svg id="analyst-icon" viewBox="0 0 32 36" focusable="false" hidden>
+            <circle cx="16" cy="8" r="6" fill="currentColor"/>
+            <path d="m10 17-6 3-3 7 5 2 1-3v8h18v-8l1 3 5-2-3-7-6-3-6 4Z" fill="currentColor"/>
+            <path d="m10 17 6 4-4 6-4-8m14-2-6 4 4 6 4-8" fill="var(--paper)"/>
+            <circle cx="16" cy="27" r=".8" fill="var(--paper)"/>
+            <circle cx="16" cy="31" r=".8" fill="var(--paper)"/>
+          </svg>
+          <svg id="manager-icon" viewBox="0 0 32 36" focusable="false" hidden>
+            <circle cx="16" cy="8" r="6" fill="currentColor"/>
+            <path d="m9 17-5 4-2 12h28l-2-12-5-4-7 3Z" fill="currentColor"/>
+            <path d="m10 17 6 3 6-3-6 16Z" fill="var(--paper)"/>
+            <path d="m14 20 2-1 2 1-1 3 2 7-3 3-3-3 2-7Z" fill="currentColor"/>
+            <path d="m9 18 2 8-3 1 6 6m9-15-2 8 3 1-6 6" fill="none" stroke="var(--paper)" stroke-width="1"/>
+          </svg>
+        </span>
+        <div class="identity-copy"><strong id="signed-in-user">Signed out</strong><span id="session-username"></span></div>
+        <button class="text-button signout-button" id="logout-button" hidden aria-label="Sign out of your session">Sign out</button>
+      </div>
+      <span class="signed-out-label" id="signed-out-label">Not signed in</span>
     </header>
     <main id="main">
       <section class="session-panel" id="session-panel" aria-labelledby="login-heading">
+        <p class="eyebrow">A shared workspace. A defined role.</p>
         <h2 id="login-heading">Sign in to the synthetic demo</h2>
         <form id="login-form" class="auth-form">
           <label>Username<input id="username" name="username" autocomplete="username" required maxlength="64"></label>
@@ -47,20 +70,25 @@
         </form>
         <p class="muted">Demo accounts: analyst / AnalystDemo!2026 and manager / ManagerDemo!2026. Synthetic data only.</p>
       </section>
-      <p class="mode-banner" id="mode-banner">Deterministic demo mode (no LLM). Live generation is disabled unless explicitly configured.</p>
       <div class="page-heading">
         <div>
-          <p class="eyebrow">Document Reader</p>
-          <h1>Document workspace</h1>
-          <p class="intro">Read text files, inspect source lines, and export evidence.</p>
+          <p class="eyebrow">iContinuum / Document intelligence</p>
+          <h1>From source to decision.</h1>
+          <p class="intro">Read the evidence. Trace every claim. Make an informed review.</p>
         </div>
         <button class="button secondary" id="export-button" disabled>Download JSON</button>
       </div>
+      <ol class="workflow-guide" aria-label="How this workspace works">
+        <li><span>01 / Reader</span><p>Add documents &amp; inspect lines</p></li>
+        <li><span>02 / Analysis</span><p>Generate a brief or check requirements</p></li>
+        <li><span>03 / Audit</span><p>Validate citations, then Manager review</p></li>
+      </ol>
+      <p class="mode-banner" id="mode-banner">Deterministic demo mode (no LLM). Live generation is disabled unless explicitly configured.</p>
       <div class="summary-bar" aria-label="Workspace summary">
         <div><strong id="document-count">00</strong><span>Documents</span></div>
         <div><strong id="line-count">00</strong><span>Source lines</span></div>
         <div><strong id="ready-count">00</strong><span>Ready for analysis</span></div>
-        <p>Original text is preserved. <br>Every analysis is audited before human review.</p>
+        <p>Evidence stays traceable.<br> Human judgment stays essential.</p>
       </div>
       <section class="upload-section" id="upload" aria-labelledby="add-heading">
         <div class="section-heading">
@@ -107,7 +135,7 @@
             <div class="source-meta" id="source-meta" hidden></div>
             <div id="viewer-empty" class="viewer-empty">
               <p class="tiny-label">Source preview</p>
-              <h3>No source selected.</h3>
+              <h3>Your evidence starts here.</h3>
               <p>Upload a text file or load the sample documents to view numbered lines.</p>
             </div>
             <div id="source-lines" class="source-lines" hidden></div>
@@ -139,13 +167,15 @@ quantum encryption</textarea>
           <button class="text-button" id="request-button" disabled>Download analysis request</button>
         </div>
       </section>
-      <section class="analysis-history" aria-labelledby="history-heading">
-        <h2 id="history-heading">Saved runs in this server session</h2>
+      <section class="analysis-history" id="history" aria-labelledby="history-heading">
+        <div class="section-heading"><h2 id="history-heading"><span class="section-number">04</span> Review &amp; audit</h2><span class="muted">Saved runs / this server session</span></div>
+        <p class="muted">Open a result to inspect its evidence, automated audit, and recorded human decision.</p>
         <div class="history-controls"><select id="analysis-history" aria-label="Select an analysis run"><option value="">No accessible runs</option></select>
           <button class="button secondary" id="load-run-button" disabled>Open result</button>
           <button class="text-button" id="refresh-runs-button" disabled>Refresh runs</button></div>
       </section>
       <section class="analysis-result" id="analysis-result" aria-labelledby="result-heading" hidden>
+        <p class="result-kind" id="result-kind"></p>
         <div class="section-heading"><h2 id="result-heading">Analysis result</h2><button class="button secondary" id="result-download">Download result JSON</button></div>
         <p id="result-meta" class="muted"></p>
         <p id="result-status" class="result-status" role="status"></p>

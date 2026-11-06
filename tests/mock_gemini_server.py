@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 import tempfile
 from unittest.mock import patch
+from urllib.error import URLError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -57,8 +58,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8002)
     parser.add_argument("--provider", choices=("gemini", "groq"), default="gemini")
+    parser.add_argument("--fallback", action="store_true", help="Simulate a provider outage without a network request.")
     args = parser.parse_args()
-    with tempfile.TemporaryDirectory() as folder, patch("backend.{}._send_request".format(args.provider), side_effect=reply):
+    response = URLError("Offline test outage") if args.fallback else reply
+    with tempfile.TemporaryDirectory() as folder, patch("backend.{}._send_request".format(args.provider), side_effect=response):
         provider = (GroqBriefGenerator("OFFLINE_TEST_FIXTURE_KEY", enabled=True) if args.provider == "groq"
                     else GeminiBriefGenerator("OFFLINE_TEST_FIXTURE_KEY", "gemini-mock-fixture", enabled=True))
         server = create_server(args.port, data_dir=folder, brief_generator=provider)

@@ -133,9 +133,11 @@ class FullWorkflowTests(unittest.TestCase):
         self.assertNotIn(run["analysis_id"], repr(listing))
 
     def test_anonymous_and_fake_session_cannot_access_document_routes(self):
+        # Authentication is checked before reading a POST body. Omit it here
+        # to avoid a Windows TCP reset when the server rejects the request early.
         for method, route, payload in (("GET", "/api/demo", None), ("GET", "/api/documents", None),
-                                       ("POST", "/api/analysis", {"task": "brief", "document_ids": []}),
-                                       ("POST", "/api/documents", {"files": []})):
+                                       ("POST", "/api/analysis", None),
+                                       ("POST", "/api/documents", None)):
             status, _, _ = self.call(None, method, route, payload)
             self.assertEqual(status, 401)
         status, _, _ = self.call(None, "GET", "/api/demo", headers={"Cookie": "icontinuum_session=fake", "X-Role": "manager"})
