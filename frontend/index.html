@@ -12,28 +12,29 @@
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to workspace</a>
-  <aside class="sidebar">
+  <aside class="sidebar" id="workspace-sidebar" hidden>
     <a class="brand" href="/" aria-label="iContinuum home">iContinuum</a>
-    <p class="workspace-label">Agentic AI Mesh<br>Evidence &amp; review workspace</p>
+    <p class="workspace-label">Document workspace</p>
     <nav class="workspace-nav" aria-label="Workspace sections">
-      <a href="#upload"><span>01</span> Upload documents</a>
-      <a href="#sources"><span>02</span> Read sources</a>
-      <a href="#handoff"><span>03</span> Run analysis</a>
-      <a href="#history"><span>04</span> Review &amp; audit</a>
+      <a href="#upload"><span>01</span> Documents</a>
+      <a href="#handoff"><span>02</span> Analysis</a>
+      <a href="#history"><span>03</span> Results</a>
+      <a href="#manager-review" id="manager-nav" hidden>Manager review</a>
     </nav>
-    <h2 class="sidebar-section">The shared workflow</h2>
-    <ol class="agent-list">
-      <li><span class="agent-number ready">01</span><div><strong>Reader</strong><p>Preserves text and source lines.</p><small id="reader-status">Checking connection...</small></div></li>
-      <li><span class="agent-number">02</span><div><strong>Analysis</strong><p>Builds a brief or checks evidence.</p><small id="analysis-status">Checking connection...</small></div></li>
-      <li><span class="agent-number">03</span><div><strong>Audit</strong><p>Checks citations; flags concerns.</p><small id="audit-agent-status">Checking connection...</small></div></li>
-    </ol>
-    <div class="sidebar-note"><span class="tiny-label">Local demo</span><p>Uploads and results stay in server memory until restart. Audit records are saved locally.</p></div>
-    <div class="local-note">Local prototype <span>v0.2</span></div>
+    <details class="how-it-works">
+      <summary>How it works</summary>
+      <ol class="agent-list">
+        <li><div><strong>Reader</strong><p>Keeps original text and line numbers.</p><small id="reader-status">Checking connection...</small></div></li>
+        <li><div><strong>Analysis</strong><p>Creates a brief or checks requirements.</p><small id="analysis-status">Checking connection...</small></div></li>
+        <li><div><strong>Audit</strong><p>Checks sources and flags concerns.</p><small id="audit-agent-status">Checking connection...</small></div></li>
+      </ol>
+    </details>
+    <div class="sidebar-note"><p>Documents and results clear when the server restarts. Audit records are saved locally.</p></div>
   </aside>
   <div class="page">
     <header class="topbar">
-      <span class="edition-label">Unissant Challenge X <span>/ UC2</span></span>
-      <a class="connection" href="/api/health" target="_blank" rel="noopener" aria-label="Reader connection status; opens API status in a new tab">
+      <span class="edition-label">iContinuum <span>/ Unissant Challenge X</span></span>
+      <a class="connection" href="/api/health" target="_blank" rel="noopener" aria-label="System status; opens technical details in a new tab">
         <span class="status-dot" id="connection-dot" aria-hidden="true"></span>
         <span id="connection-label">Connecting</span>
       </a>
@@ -61,60 +62,43 @@
     </header>
     <main id="main">
       <section class="session-panel" id="session-panel" aria-labelledby="login-heading">
-        <p class="eyebrow">A shared workspace. A defined role.</p>
-        <h2 id="login-heading">Sign in to the synthetic demo</h2>
+        <h1 id="login-heading">Sign in</h1>
         <form id="login-form" class="auth-form">
           <label>Username<input id="username" name="username" autocomplete="username" required maxlength="64"></label>
           <label>Password<input id="password" name="password" type="password" autocomplete="current-password" required maxlength="128"></label>
           <button class="button primary" id="login-button" type="submit">Sign in</button>
         </form>
-        <p class="muted">Demo accounts: analyst / AnalystDemo!2026 and manager / ManagerDemo!2026. Synthetic data only.</p>
+        <div class="demo-accounts"><p><strong>Analyst:</strong> analyst / AnalystDemo!2026</p><p><strong>Manager:</strong> manager / ManagerDemo!2026</p><small>Synthetic documents only.</small></div>
       </section>
-      <div class="page-heading">
-        <div>
-          <p class="eyebrow">iContinuum / Document intelligence</p>
-          <h1>From source to decision.</h1>
-          <p class="intro">Read the evidence. Trace every claim. Make an informed review.</p>
-        </div>
-        <button class="button secondary" id="export-button" disabled>Download JSON</button>
-      </div>
-      <ol class="workflow-guide" aria-label="How this workspace works">
-        <li><span>01 / Reader</span><p>Add documents &amp; inspect lines</p></li>
-        <li><span>02 / Analysis</span><p>Generate a brief or check requirements</p></li>
-        <li><span>03 / Audit</span><p>Validate citations, then Manager review</p></li>
-      </ol>
-      <p class="mode-banner" id="mode-banner">Deterministic demo mode (no LLM). Live generation is disabled unless explicitly configured.</p>
-      <div class="summary-bar" aria-label="Workspace summary">
-        <div><strong id="document-count">00</strong><span>Documents</span></div>
-        <div><strong id="line-count">00</strong><span>Source lines</span></div>
-        <div><strong id="ready-count">00</strong><span>Ready for analysis</span></div>
-        <p>Evidence stays traceable.<br> Human judgment stays essential.</p>
-      </div>
+      <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
+      <div id="workspace" hidden>
       <section class="upload-section" id="upload" aria-labelledby="add-heading">
         <div class="section-heading">
-          <h2 id="add-heading"><span class="section-number">01</span> Upload documents</h2>
-          <span class="muted">.txt / UTF-8</span>
+          <h1 id="add-heading" tabindex="-1"><span class="section-number">1</span> Add documents</h1>
+          <button class="text-button" id="export-button" disabled>Download documents JSON</button>
         </div>
         <div class="dropzone" id="dropzone">
           <div class="dropzone-copy">
-            <strong>Drop text files here or choose them from your computer.</strong>
-            <p>Up to 12 documents. Each file: 256 KiB and 10,000 lines maximum.</p>
+            <strong>Drop .txt files here</strong>
+            <p>UTF-8 text. Up to 12 files, 256 KiB and 10,000 lines each.</p>
           </div>
-          <button class="button primary" id="browse-button">Choose files</button>
+          <div class="upload-actions"><button class="button primary" id="browse-button">Choose files</button>
+          <button class="button secondary" id="demo-button">Load sample documents</button></div>
           <input id="file-input" type="file" accept=".txt,text/plain" multiple hidden>
-        </div>
-        <div class="demo-row">
-          <button class="text-button" id="demo-button">Load accessible fictional documents</button>
-          <span class="demo-detail">The sample set includes conflicting retention statements.</span>
         </div>
         <label class="access-field" id="upload-access-label" hidden>Access for new uploads
           <select id="upload-access"><option value="public">Standard: uploader and Managers</option><option value="restricted">Restricted: Manager only</option></select>
         </label>
       </section>
-      <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
-      <section class="review-section" id="sources" aria-labelledby="review-heading">
+      <div class="summary-bar" id="document-summary" aria-label="Document summary" hidden>
+        <div><strong id="document-count">00</strong><span>Documents</span></div>
+        <div><strong id="line-count">00</strong><span>Lines reviewed</span></div>
+        <div><strong id="ready-count">00</strong><span>Ready</span></div>
+      </div>
+      <details class="review-section" id="sources" hidden>
+        <summary>View documents and sources</summary>
         <div class="section-heading">
-          <h2 id="review-heading"><span class="section-number">02</span> Read sources</h2>
+          <h3 id="review-heading">Documents</h3>
           <button class="text-button subtle" id="clear-button" disabled>Clear workspace</button>
         </div>
         <div class="review-grid">
@@ -122,11 +106,11 @@
             <div class="panel-label">Documents <span id="library-count">0</span></div>
             <div id="document-list" class="document-list"></div>
             <p class="library-empty" id="library-empty">No documents added.</p>
-            <p class="library-footer">Original text. No summarization.</p>
+            <p class="library-footer">Original text</p>
           </div>
           <div class="source-panel">
             <div class="viewer-toolbar">
-              <strong id="viewer-name">Source preview</strong>
+              <strong id="viewer-name">Document text</strong>
               <div class="view-tabs" aria-label="Preview format">
                 <button id="source-tab" aria-pressed="true">Source</button>
                 <button id="json-tab" aria-pressed="false">JSON</button>
@@ -134,62 +118,64 @@
             </div>
             <div class="source-meta" id="source-meta" hidden></div>
             <div id="viewer-empty" class="viewer-empty">
-              <p class="tiny-label">Source preview</p>
-              <h3>Your evidence starts here.</h3>
-              <p>Upload a text file or load the sample documents to view numbered lines.</p>
+              <h3>Select a document</h3>
+              <p>Choose a document to see its text and line numbers.</p>
             </div>
             <div id="source-lines" class="source-lines" hidden></div>
             <pre id="json-preview" class="json-preview" hidden></pre>
             <div class="citation-bar">
-              <div><span class="tiny-label">Source reference</span><p id="citation-hint">Select a source line to create a citation.</p></div>
+              <div><span class="tiny-label">Sources</span><p id="citation-hint">Select a line to copy its source reference.</p></div>
               <button class="button small secondary" id="copy-button" disabled>Copy citation</button>
             </div>
           </div>
         </div>
-      </section>
+      </details>
       <section class="handoff" id="handoff" aria-labelledby="handoff-heading">
-        <div class="handoff-copy">
-          <h2 id="handoff-heading"><span class="section-number">03</span> Run analysis</h2>
-          <p>Run an audited analysis of the readable documents in this workspace.</p>
-          <p class="muted">Word matches do not establish compliance. A Manager records the final review.</p>
-        </div>
+        <h2 id="handoff-heading"><span class="section-number">2</span> Run analysis</h2>
         <div class="handoff-controls">
           <div class="task-switch" aria-label="Analysis application">
-            <button id="brief-task" aria-pressed="true">Brief Generator</button>
-            <button id="requirements-task" aria-pressed="false">Requirements Checker</button>
+            <button id="brief-task" aria-pressed="true">Create brief</button>
+            <button id="requirements-task" aria-pressed="false">Check requirements</button>
           </div>
-          <p id="task-description">Prepare documents for a cited brief.</p>
+          <p id="task-description">Create a brief with sources.</p>
+          <p class="mode-banner" id="mode-banner">Demo mode: uses document extracts instead of live AI.</p>
           <label id="requirements-label" class="requirements-field" hidden>Requirements to look for (one per line)
             <textarea id="requirements-input" rows="3" maxlength="10000">audit records
 quantum encryption</textarea>
           </label>
-          <button class="button primary" id="run-button" disabled>Run analysis</button>
-          <button class="text-button" id="request-button" disabled>Download analysis request</button>
+          <div class="analysis-actions"><button class="button primary" id="run-button" aria-describedby="analysis-hint" disabled>Run analysis</button>
+          <p id="analysis-hint" class="muted">Add documents above to enable analysis.</p></div>
+          <details class="analysis-options" id="analysis-options"><summary>More downloads</summary><button class="text-button" id="request-button" disabled>Download analysis request JSON</button></details>
         </div>
       </section>
       <section class="analysis-history" id="history" aria-labelledby="history-heading">
-        <div class="section-heading"><h2 id="history-heading"><span class="section-number">04</span> Review &amp; audit</h2><span class="muted">Saved runs / this server session</span></div>
-        <p class="muted">Open a result to inspect its evidence, automated audit, and recorded human decision.</p>
-        <div class="history-controls"><select id="analysis-history" aria-label="Select an analysis run"><option value="">No accessible runs</option></select>
+        <h2 id="history-heading"><span class="section-number">3</span> Review results</h2>
+        <p class="muted" id="results-empty">Run analysis above, or open a saved result.</p>
+        <details class="saved-results" id="saved-results"><summary>Saved results</summary>
+        <div class="history-controls"><select id="analysis-history" aria-label="Select a saved result"><option value="">No saved results</option></select>
           <button class="button secondary" id="load-run-button" disabled>Open result</button>
-          <button class="text-button" id="refresh-runs-button" disabled>Refresh runs</button></div>
+          <button class="text-button" id="refresh-runs-button" disabled>Refresh</button></div>
+        </details>
       </section>
       <section class="analysis-result" id="analysis-result" aria-labelledby="result-heading" hidden>
         <p class="result-kind" id="result-kind"></p>
-        <div class="section-heading"><h2 id="result-heading">Analysis result</h2><button class="button secondary" id="result-download">Download result JSON</button></div>
-        <p id="result-meta" class="muted"></p>
+        <div class="section-heading"><h3 id="result-heading">Results</h3><button class="text-button" id="result-download">Download result JSON</button></div>
+        <p class="muted" id="result-mode-explanation"></p>
         <p id="result-status" class="result-status" role="status"></p>
         <div id="result-content"></div>
         <div class="human-review" id="manager-review" hidden>
-          <h3>Manager review</h3><p>Check each claim against its cited sources before approving. Approval records a human decision; automated audit warnings and failures are retained. Source conflicts are not resolved automatically.</p>
+          <h3>Manager review</h3><p>Check statements against their sources. Your decision keeps all warnings and conflicts on record.</p>
           <label>Review note<textarea id="review-comment" rows="2" maxlength="1000" placeholder="Explain your decision"></textarea></label>
           <button class="button primary" id="approve-button">Approve</button>
           <button class="button secondary" id="reject-button">Reject</button>
+          <p id="approval-hint" class="muted" hidden>Approval is unavailable while source checks have errors. You can reject the result and explain why.</p>
         </div>
         <p id="review-readonly" class="muted">A Manager must approve or reject this result.</p>
-        <button class="text-button" id="trail-button">Show audit trail</button>
+        <details class="run-details" id="run-details"><summary>Run details</summary><p id="result-meta" class="muted"></p></details>
+        <button class="text-button" id="trail-button" aria-expanded="false" aria-controls="audit-trail">Show audit trail</button>
         <pre class="trail-preview" id="audit-trail" hidden></pre>
       </section>
+      </div>
       <footer><span>iContinuum / Unissant Challenge X</span><span>Local proof of concept</span></footer>
     </main>
   </div>

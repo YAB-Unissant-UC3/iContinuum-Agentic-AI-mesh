@@ -41,7 +41,16 @@ async function waitFor(expression) {
   await screenshot('failure.png');
   throw new Error(`Condition failed: ${expression}`);
 }
-async function click(id) { await evaluate(`document.getElementById(${JSON.stringify(id)}).click()`); }
+async function click(id) {
+  assert.ok(await evaluate(`document.getElementById(${JSON.stringify(id)}).checkVisibility()`), `Control is hidden: ${id}`);
+  await evaluate(`document.getElementById(${JSON.stringify(id)}).click()`);
+}
+async function openDetails(id) {
+  await evaluate(`(() => {
+    const details = document.getElementById(${JSON.stringify(id)});
+    if (!details.open) details.querySelector('summary').click();
+  })()`);
+}
 async function assertIdentity(name) {
   const identity = await evaluate(`({
     role: state.user?.role, label: document.getElementById('signed-in-user').textContent,
@@ -77,6 +86,11 @@ async function login(name, password) {
   await evaluate(`document.getElementById('username').value=${JSON.stringify(name)}; document.getElementById('password').value=${JSON.stringify(password)}; document.getElementById('login-form').requestSubmit()`);
   await waitFor(`state.user?.role === '${name}' && !state.busy`);
   await assertIdentity(name);
+  assert.equal(await evaluate(`document.getElementById('workspace').hidden`), false);
+  assert.equal(await evaluate(`document.getElementById('session-panel').hidden`), true);
+  assert.equal(await evaluate(`document.getElementById('run-button').disabled`), true);
+  assert.match(await evaluate(`document.getElementById('analysis-hint').textContent`), /Add documents/);
+  assert.equal(await evaluate(`document.getElementById('manager-nav').hidden`), true);
 }
 async function run(task) {
   await click(`${task}-task`);
@@ -89,10 +103,11 @@ async function run(task) {
     assert.equal(await evaluate('state.result.provider'), mockedGroq ? 'groq' : 'gemini');
   }
   assert.equal(await evaluate(`document.getElementById('result-kind').dataset.generation`), mockedAI && task === 'brief' ? 'ai' : 'deterministic');
-  assert.match(await evaluate(`document.getElementById('result-kind').textContent`), mockedAI && task === 'brief' ? /AI-generated draft/ : /no AI-generated text/);
+  assert.match(await evaluate(`document.getElementById('result-kind').textContent`), mockedAI && task === 'brief' ? /AI-generated draft/ : /Demo mode/);
+  if (!mockedAI || task !== 'brief') assert.match(await evaluate(`document.getElementById('result-mode-explanation').textContent`), /document extracts/);
   if (mockedFallback && task === 'brief') {
     assert.equal(await evaluate('state.result.fallback_reason'), 'provider_unavailable');
-    assert.match(await evaluate(`document.getElementById('result-kind').textContent`), /Deterministic fallback/);
+    assert.match(await evaluate(`document.getElementById('result-kind').textContent`), /AI not used/);
   }
   await assertIdentity(await evaluate('state.user.role'));
   return evaluate('state.result.analysis_id');
@@ -137,11 +152,15 @@ try {
   await send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloads });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: origin });
-  await waitFor(`document.getElementById('connection-label')?.textContent === 'Reader connected' && !document.getElementById('login-button').disabled`);
+  await waitFor(`document.getElementById('connection-label')?.textContent === 'System ready' && !document.getElementById('login-button').disabled`);
   assert.ok(await evaluate(`document.fonts.ready.then(() => ['DM Serif Display', 'Manrope'].every(
     family => Array.from(document.fonts).some(font => font.family.replace(/["']/g, '') === family && font.status === 'loaded')))`), 'Local editorial fonts did not load');
   assert.ok(await evaluate(`performance.getEntriesByType('resource').every(resource => new URL(resource.name).origin === location.origin)`), 'Workspace must not require external font services');
   assert.equal(await evaluate(`document.getElementById('browse-button').disabled`), true);
+  assert.equal(await evaluate(`document.getElementById('workspace').hidden`), true);
+  assert.equal(await evaluate(`document.getElementById('workspace-sidebar').hidden`), true);
+  assert.equal(await evaluate(`document.getElementById('login-heading').textContent`), 'Sign in');
+  await screenshot('sign-in.png', false);
   await login('analyst', 'AnalystDemo!2026');
   // The authenticated session, rather than a local role selector, survives reload.
   await send('Page.reload');
@@ -150,12 +169,17 @@ try {
   await click('demo-button');
   await waitFor(`document.getElementById('document-count').textContent === '03' && !state.busy`);
   assert.equal(await evaluate(`document.getElementById('line-count').textContent`), '30');
+  assert.equal(await evaluate(`document.getElementById('sources').open`), false);
+  assert.ok(await evaluate(`['add-heading', 'handoff-heading', 'history-heading'].every(id =>
+    document.getElementById(id).getBoundingClientRect().bottom <= innerHeight)`), 'Three steps should fit on the desktop starting view');
   await evaluate('window.scrollTo(0, 0)');
   await screenshot('workspace-desktop.png', false);
   const briefRun = await run('brief');
   assert.ok(await evaluate('state.result.claims.length > 0'));
   await evaluate(`document.querySelector('.result-citation').click()`);
   await waitFor(`document.querySelectorAll('.source-line.selected').length === 1`);
+  assert.equal(await evaluate(`document.getElementById('sources').open`), true);
+  assert.ok(await evaluate(`document.querySelector('.source-line.selected').checkVisibility()`), 'A citation must open its source preview');
   await click('copy-button');
   await waitFor(`document.getElementById('notice').textContent.includes('Citation copied')`);
   assert.match(JSON.parse(await evaluate('navigator.clipboard.readText()')).document_id, /^doc_[a-f0-9]{64}$/);
@@ -163,6 +187,11 @@ try {
   assert.deepEqual(await evaluate('state.result.contradictions[0].citations.map(c => c.line_start)'), [9, 8]);
   assert.equal(await evaluate('state.result.requirement_checks[1].status'), 'unclear');
   await click('export-button'); assert.equal((await downloaded('icontinuum-documents')).documents.length, 3);
+  await openDetails('sources');
+  await click('json-tab');
+  assert.ok(await evaluate(`document.getElementById('json-preview').checkVisibility()`));
+  await click('source-tab');
+  await openDetails('analysis-options');
   await click('request-button'); assert.equal((await downloaded('icontinuum-analysis-request')).task, 'requirements');
   await click('result-download'); assert.equal((await downloaded(requirementsRun)).audit.status, 'passed');
   await screenshot('analyst-result.png');
@@ -179,26 +208,42 @@ try {
   assert.equal(await evaluate(`document.getElementById('result-content').textContent`), '');
   assert.equal(await evaluate(`document.getElementById('session-identity').hidden`), true);
   assert.equal(await evaluate(`document.getElementById('session-username').textContent`), '');
+  assert.equal(await evaluate(`document.getElementById('workspace').hidden`), true);
+  assert.equal(await evaluate(`document.getElementById('workspace-sidebar').hidden`), true);
   await login('manager', 'ManagerDemo!2026');
   const reviewRun = mockedAI ? briefRun : requirementsRun;
+  await openDetails('saved-results');
   await evaluate(`document.getElementById('analysis-history').value=${JSON.stringify(reviewRun)}; document.getElementById('analysis-history').dispatchEvent(new Event('change'))`);
   await click('load-run-button'); await waitFor(`state.result?.analysis_id === '${reviewRun}' && !state.busy`);
   assert.equal(await evaluate(`document.getElementById('manager-review').hidden`), false);
+  assert.equal(await evaluate(`document.getElementById('manager-nav').hidden`), false);
+  await click('manager-nav');
   await evaluate(`document.getElementById('review-comment').value='Reviewed the retention conflict; escalation recorded.'`);
   await click('approve-button'); await waitFor(`state.result.review.status === 'approved' && !state.busy`);
   assert.equal(await evaluate('state.result.audit.status'), mockedAI ? 'needs_review' : 'passed');
   await click('trail-button'); await waitFor(`!document.getElementById('audit-trail').hidden`);
+  assert.equal(await evaluate(`document.getElementById('trail-button').textContent`), 'Hide audit trail');
+  assert.equal(await evaluate(`document.getElementById('trail-button').getAttribute('aria-expanded')`), 'true');
   assert.equal(JSON.parse(await evaluate(`document.getElementById('audit-trail').textContent`)).at(-1).role, 'manager');
+  await click('trail-button');
+  assert.equal(await evaluate(`document.getElementById('audit-trail').hidden`), true);
+  assert.equal(await evaluate(`document.getElementById('trail-button').textContent`), 'Show audit trail');
+  assert.equal(await evaluate(`document.getElementById('trail-button').getAttribute('aria-expanded')`), 'false');
+  await click('trail-button'); await waitFor(`!document.getElementById('audit-trail').hidden`);
   await evaluate(`document.getElementById('review-comment').value='Rejected pending reconciliation of retention periods.'`);
   await click('reject-button'); await waitFor(`state.result.review.status === 'rejected' && !state.busy`);
+  assert.equal(await evaluate(`document.getElementById('audit-trail').hidden`), true);
+  assert.equal(await evaluate(`document.getElementById('trail-button').textContent`), 'Show audit trail');
   await screenshot('manager-review.png');
   await assertMobileIdentity('manager');
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await evaluate('window.scrollTo(0, document.body.scrollHeight)');
   await screenshot('manager-mobile.png', false);
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
+  await openDetails('sources');
   await click('clear-button'); await click('demo-button'); await waitFor('state.documents.length === 4 && !state.busy');
   const restrictedId = await evaluate(`state.documents.find(d => d.access === 'restricted').document_id`);
+  await openDetails('sources');
   await evaluate(`for (let i=0;i<3;i++) document.querySelector('.remove-document').click()`);
   const restrictedRun = await run('brief');
   assert.ok(await evaluate(`JSON.stringify(state.result).includes('CEDAR-DEMO-742')`));
@@ -211,6 +256,9 @@ try {
   }
   await assertMobileIdentity('analyst');
   await screenshot('narrow-layout.png');
+  await upload([path.join(scratch, 'empty.txt')]);
+  assert.equal(await evaluate(`document.getElementById('run-button').disabled`), true);
+  assert.match(await evaluate(`document.getElementById('analysis-hint').textContent`), /No readable text/);
   assert.deepEqual(errors, []);
   console.log('PASS: login, examples, uploads, extracts, conflicts, source links, clipboard, downloads, audit trail, Manager approve/reject, logout clearing, direct restricted API denial, and responsive layouts.');
 } finally {
