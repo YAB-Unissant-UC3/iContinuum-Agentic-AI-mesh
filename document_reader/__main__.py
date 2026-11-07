@@ -8,9 +8,9 @@ from .reader import read_document
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Read UTF-8 .txt files and print JSON with source line numbers."
+        description="Read UTF-8 TXT or text PDF files and print JSON with source locations."
     )
-    parser.add_argument("files", nargs="+", help="One or more .txt file paths.")
+    parser.add_argument("files", nargs="+", help="One or more .txt or .pdf file paths.")
     args = parser.parse_args()
 
     documents = [read_document(file_path) for file_path in args.files]

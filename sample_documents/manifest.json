@@ -3,6 +3,11 @@
     {"path": "project_brief.txt", "allowed_roles": ["analyst", "manager"]},
     {"path": "requirements.txt", "allowed_roles": ["analyst", "manager"]},
     {"path": "meeting_notes.txt", "allowed_roles": ["analyst", "manager"]},
-    {"path": "restricted/manager_notes.txt", "allowed_roles": ["manager"]}
+    {"path": "restricted/manager_notes.txt", "allowed_roles": ["manager"]},
+    {"path": "DOC-001_statement_ajmain.txt", "allowed_roles": ["analyst", "manager"]},
+    {"path": "DOC-002_statement_saaiem.pdf", "allowed_roles": ["analyst", "manager"]},
+    {"path": "DOC-003_statement_rifat.txt", "allowed_roles": ["analyst", "manager"]},
+    {"path": "DOC-004_eyewitness_priya.pdf", "allowed_roles": ["analyst", "manager"]},
+    {"path": "DOC-005_police_report.pdf", "allowed_roles": ["manager"]}
   ]
 }

@@ -1,13 +1,14 @@
 """Server-owned evidence, ACLs, results, and metadata-only JSONL audit records."""
 
 import copy
+import hashlib
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 from threading import RLock
 import uuid
 
-from document_reader import read_document
+from document_reader import read_document_bytes
 
 
 class WorkspaceError(Exception):
@@ -31,14 +32,20 @@ class Workspace:
                 raise ValueError("Invalid document roles in manifest.")
             if source.stat().st_size > 256 * 1024:
                 raise ValueError("Synthetic manifest file exceeds 256 KiB.")
-            document = read_document(source)
-            if document["status"] != "ok" or document["line_count"] > 10000:
-                raise ValueError("Synthetic manifest documents must be readable and within line limits.")
-            document["source_path"] = "sample_documents/" + item["path"]
-            identifier = document["document_id"]
+            if source.suffix.lower() not in {".txt", ".pdf"}:
+                raise ValueError("Manifest documents must be TXT or PDF files.")
+            with source.open("rb") as stream:
+                raw = stream.read(256 * 1024 + 1)
+            if len(raw) > 256 * 1024:
+                raise ValueError("Synthetic manifest file exceeds 256 KiB.")
+            identifier = "doc_" + hashlib.sha256(raw).hexdigest()
             if identifier in self.documents:
                 raise ValueError("Manifest contains duplicate file contents.")
-            self.documents[identifier] = {"document": document, "roles": roles, "owner": None}
+            # Index identities and ACLs, not extracted text. In particular, the
+            # restricted police report is never parsed on an Analyst request.
+            self.documents[identifier] = {"document": None, "roles": roles, "owner": None,
+                                          "raw": raw, "name": source.name,
+                                          "source_path": "sample_documents/" + item["path"]}
             self.demo_ids.append(identifier)
 
     def allowed(self, record, user):
@@ -51,6 +58,12 @@ class Workspace:
         record = self.documents.get(identifier)
         if not record or not self.allowed(record, user):
             raise WorkspaceError("access_denied", "Document access denied.", 403)
+        if record["document"] is None:
+            document = read_document_bytes(record["name"], record["raw"])
+            if document["status"] != "ok" or document["line_count"] > 10000:
+                raise WorkspaceError("unreadable_document", "A registered sample cannot be extracted within the document limits.", 422)
+            document["source_path"] = record["source_path"]
+            record["document"] = document
         result = copy.deepcopy(record["document"])
         result["access"] = "restricted" if record["roles"] == frozenset({"manager"}) else "public"
         return result
@@ -60,20 +73,26 @@ class Workspace:
         return [self.document(identifier, user) for identifier in identifiers
                 if self.allowed(self.documents[identifier], user)]
 
-    def register(self, documents, access, user):
+    def authorize_uploads(self, decoded, access, user):
+        """Check every raw-byte identity before any upload is extracted."""
         if access not in ("public", "restricted"):
             raise WorkspaceError("invalid_access", "access must be public or restricted.")
         if access == "restricted" and user["role"] != "manager":
             raise WorkspaceError("access_denied", "Only Managers can register restricted uploads.", 403)
         roles = frozenset({"manager"}) if access == "restricted" else frozenset({"analyst", "manager"})
-        for document in documents:
-            identifier = document["document_id"]
+        for _, raw in decoded:
+            identifier = "doc_" + hashlib.sha256(raw).hexdigest()
             existing = self.documents.get(identifier)
             if existing:
                 if not self.allowed(existing, user):
                     raise WorkspaceError("access_denied", "Document access denied.", 403)
                 if existing["roles"] != roles:
                     raise WorkspaceError("classification_conflict", "Identical bytes already have a different access classification.")
+        return roles
+
+    def register(self, documents, access, user, decoded):
+        roles = self.authorize_uploads(decoded, access, user)
+        originals = {"doc_" + hashlib.sha256(raw).hexdigest(): raw for _, raw in decoded}
         new_ids = {d["document_id"] for d in documents if d["document_id"] and d["document_id"] not in self.documents}
         if len(self.documents) + len(new_ids) > 100:
             raise WorkspaceError("workspace_full", "Demo workspace is full. Restart the server to clear uploads.", 413)
@@ -82,7 +101,7 @@ class Workspace:
             identifier = document["document_id"]
             if identifier:
                 self.documents.setdefault(identifier, {"document": copy.deepcopy(document), "roles": roles,
-                                                       "owner": user["username"]})
+                                                       "owner": user["username"], "raw": originals[identifier]})
                 results.append(self.document(identifier, user))
             else:
                 results.append(document)
@@ -98,6 +117,10 @@ class Workspace:
         if not isinstance(identifiers, list) or not 1 <= len(identifiers) <= 12:
             raise WorkspaceError("invalid_documents", "Select between 1 and 12 documents.")
         # Resolve every ID and permission before trusting any submitted evidence.
+        for identifier in identifiers:
+            if (not isinstance(identifier, str) or identifier not in self.documents
+                    or not self.allowed(self.documents[identifier], user)):
+                raise WorkspaceError("access_denied", "Document access denied.", 403)
         documents = [self.document(identifier, user) for identifier in identifiers]
         if len(set(identifiers)) != len(identifiers):
             raise WorkspaceError("invalid_documents", "Select unique documents.")
@@ -105,10 +128,22 @@ class Workspace:
             if not isinstance(supplied, list) or len(supplied) != len(documents):
                 raise WorkspaceError("invalid_documents", "Document snapshots must match selected IDs.")
             for original, provided in zip(documents, supplied):
+                fields = ("document_id", "text", "lines", "line_count", "status", "file_name")
+                if original.get("format") == "pdf":
+                    fields += ("format", "pages", "page_count", "extraction", "encoding")
                 if not isinstance(provided, dict) or any(provided.get(field) != original[field]
-                    for field in ("document_id", "text", "lines", "line_count", "status", "file_name")):
+                    for field in fields):
                     raise WorkspaceError("modified_evidence", "Submitted evidence differs from server records.")
         return {"task": payload.get("task"), "requirements": payload.get("requirements", []), "documents": documents}
+
+    def pdf_sources(self, documents, user):
+        """Private originals for canonical validation; never part of API JSON."""
+        for document in documents:
+            record = self.documents.get(document["document_id"])
+            if not record or not self.allowed(record, user):
+                raise WorkspaceError("access_denied", "Document access denied.", 403)
+        return {d["document_id"]: self.documents[d["document_id"]]["raw"]
+                for d in documents if d.get("format") == "pdf"}
 
     def write_event(self, event, user):
         record = dict(event, event_id="event_" + uuid.uuid4().hex,

@@ -8,6 +8,7 @@ import re
 from mesh import AuditAgent
 from mesh.models import Analysis, Citation, Finding
 from mesh.conflicts import detect_conflicts
+from .source_locations import page_references
 
 
 def audit_analysis(result, passages, documents=None):
@@ -17,6 +18,7 @@ def audit_analysis(result, passages, documents=None):
         sources = {(d["document_id"], line["line_number"]): line["text"]
                    for d in documents for line in d["lines"]}
     generated = result.get("mode") in {"gemini", "groq"}
+    document_lookup = {d["document_id"]: d for d in documents or []}
 
     def flag(code, target, message, severity="error"):
         flags.append({"code": code, "target": target, "message": message, "severity": severity})
@@ -42,6 +44,13 @@ def audit_analysis(result, passages, documents=None):
             if not isinstance(identifier, str):
                 flag("unknown_source", target, "Source is missing or not authorized.")
                 continue
+            if "page_references" in cite:
+                refs = cite["page_references"]
+                valid_refs = (isinstance(refs, list) and all(isinstance(ref, dict)
+                    and set(ref) == {"page_number", "line_start", "line_end"}
+                    and all(type(value) is int for value in ref.values()) for ref in refs))
+                if not valid_refs or refs != page_references(document_lookup.get(identifier), start, end):
+                    flag("page_mismatch", target, "Page references differ from the extracted source mapping.")
             lines = [sources.get((identifier, number)) for number in range(start, end + 1)]
             if any(line is None for line in lines):
                 flag("unknown_source", target, "Source is missing or not authorized.")
@@ -75,7 +84,13 @@ def audit_analysis(result, passages, documents=None):
     for conflict in result.get("contradictions", []):
         target = conflict.get("conflict_id", "conflict")
         citations(conflict.get("citations"), target)
-        if conflict not in known_conflicts:
+        # Page provenance is additive and checked above; compare the original
+        # retention-rule contract without those server-derived display fields.
+        comparison = dict(conflict)
+        if isinstance(conflict.get("citations"), list):
+            comparison["citations"] = [{key: value for key, value in cite.items() if key != "page_references"}
+                                       if isinstance(cite, dict) else cite for cite in conflict["citations"]]
+        if comparison not in known_conflicts:
             flag("unsupported_conflict", target, "Conflict is not supported by the retention rules and evidence.")
     if generated and known_conflicts:
         flag("unresolved_conflicting_evidence", "brief", "Source retention periods disagree; do not treat either value as reconciled.", "warning")

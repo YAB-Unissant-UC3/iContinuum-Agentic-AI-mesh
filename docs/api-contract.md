@@ -93,6 +93,36 @@ Successful reads are registered so analyses can refer to their IDs. Add
 is `"public"` (uploader and Managers). Existing permissions cannot be downgraded
 by resubmitting identical bytes. Managers have no unrestricted filesystem route.
 
+### Text PDFs (additive fields)
+
+The same upload endpoint accepts `.pdf` bytes. IDs hash the original PDF bytes,
+not extracted text. TXT fields and citation ranges are unchanged. PDF records
+add `format: "pdf"`, `page_count`, `pages`, and `extraction` (pypdf version and
+layout mode); `encoding` is `"extracted-text"`. Each PDF line adds `page_number`
+and `page_line_number`. `line_number` remains a continuous document-wide index.
+`pages` contains each page's global `line_start`, `line_end`, and `line_count`;
+empty pages have null bounds. `text` joins all extracted lines with `\n`.
+
+PDF citations retain `document_id`, global `line_start`/`line_end`, and exact
+`quote`. The server adds `page_references`, for example
+`[{"page_number": 2, "line_start": 3, "line_end": 5}]`. These bounds are local
+to that page; cross-page ranges have one entry per page. The model-facing
+schemas remain unchanged. Page metadata comes from the authorized canonical
+source, never from AI. Quotes must equal the inclusive global extracted lines,
+including whitespace and blank lines. Page-reference tampering also fails audit.
+
+The server lazily extracts manifest samples after ACL checks and checks raw-byte
+IDs before extracting uploads. This rejects known restricted PDFs even if
+renamed `.txt`. PDF canonical validation re-extracts server-owned original bytes;
+client text or a self-declared hash cannot establish a valid PDF document.
+The internal Python helper accepts keyword-only `pdf_sources={document_id: raw_bytes}`;
+this is private server input, never an HTTP request field or response.
+
+Additional PDF limits: 50 pages, 256 KiB extracted characters, 4 MiB decoded
+content per page/stream, and bounded parser work. Encrypted and unreadable PDFs
+return safe per-file errors; empty/image-only PDFs are not analyzed. No OCR.
+See [PDF support](pdf-support.md) for the dataset and remaining limitations.
+
 ### API errors
 
 ```json

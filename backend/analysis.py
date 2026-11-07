@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 import re
 import uuid
+from pathlib import Path
 
 from document_reader import read_document_bytes
 from mesh import AnalysisAgent
@@ -10,13 +11,14 @@ from mesh.models import Passage
 from mesh.conflicts import detect_conflicts
 from .audit import audit_analysis
 from .gemini import ProviderUnavailable
+from .source_locations import add_page_references
 
 
 class AnalysisUnavailable(Exception):
     """Reserved for an optional future model adapter."""
 
 
-def validated_passages(documents):
+def validated_passages(documents, pdf_sources=None):
     if not isinstance(documents, list) or not 1 <= len(documents) <= 12:
         raise ValueError("Provide between 1 and 12 readable documents.")
     passages, seen = [], set()
@@ -27,12 +29,21 @@ def validated_passages(documents):
         if not isinstance(name, str):
             raise ValueError("Each document needs a file name.")
         try:
-            canonical = read_document_bytes(name, document["text"].encode("utf-8"))
+            if Path(name).suffix.lower() == ".pdf":
+                raw = (pdf_sources or {}).get(document.get("document_id"))
+                if not isinstance(raw, bytes):
+                    raise ValueError("PDF validation requires server-authorized original bytes.")
+                canonical = read_document_bytes(name, raw)
+            else:
+                canonical = read_document_bytes(name, document["text"].encode("utf-8"))
         except UnicodeError:
             raise ValueError("Document text must be valid UTF-8.")
         for field in ("document_id", "text", "lines", "line_count", "status"):
             if document.get(field) != canonical[field]:
                 raise ValueError("Document identity or source lines were modified.")
+        if canonical.get("format") == "pdf" and any(document.get(field) != canonical[field]
+                for field in ("format", "pages", "page_count", "extraction", "encoding")):
+            raise ValueError("PDF extraction provenance or page mapping was modified.")
         if canonical["status"] != "ok" or canonical["document_id"] in seen:
             raise ValueError("Use unique, readable, nonempty documents.")
         seen.add(canonical["document_id"])
@@ -41,11 +52,11 @@ def validated_passages(documents):
     return passages
 
 
-def analyze_documents(request: dict, brief_generator=None) -> dict:
+def analyze_documents(request: dict, brief_generator=None, *, pdf_sources=None) -> dict:
     task = request.get("task")
     if task not in ("brief", "requirements"):
         raise ValueError("task must be brief or requirements.")
-    passages = validated_passages(request.get("documents"))
+    passages = validated_passages(request.get("documents"), pdf_sources)
     requirements = request.get("requirements", [])
     if task == "requirements":
         if (not isinstance(requirements, list) or not 1 <= len(requirements) <= 30
@@ -121,6 +132,10 @@ def analyze_documents(request: dict, brief_generator=None) -> dict:
                 result["source_redacted"] = True
                 result["limitations"].append("Quoted output withheld because selected evidence contains a credential.")
     result["audit"], result["audit_event"] = audit_analysis(result, passages, request["documents"])
+    # The server derives PDF locations from validated originals, never from AI.
+    add_page_references(result, request["documents"])
+    if any(d.get("format") == "pdf" for d in request["documents"]):
+        result["limitations"].append("PDF citations refer to pypdf-extracted page lines, not physical printed lines; complex layouts require visual review. No OCR is performed.")
     result["audit_event"]["generation_mode"] = result["mode"]
     for field in ("provider", "attempted_provider", "attempted_model"):
         if result.get(field):

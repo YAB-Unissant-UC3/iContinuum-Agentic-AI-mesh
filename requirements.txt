@@ -1,0 +1,2 @@
+# PDF extraction only; TXT and the AI adapters use the standard library.
+pypdf==7.0.0

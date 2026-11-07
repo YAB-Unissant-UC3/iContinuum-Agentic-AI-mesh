@@ -9,7 +9,7 @@ from .providers import brief_generator_from_environment
 def main():
     parser = argparse.ArgumentParser(description="Start the local iContinuum workspace.")
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--sample-dir", help="Folder containing manifest.json and synthetic .txt files.")
+    parser.add_argument("--sample-dir", help="Folder containing manifest.json and synthetic TXT/PDF files.")
     parser.add_argument("--data-dir", help="Folder for the local audit.jsonl log (default: .runtime).")
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:

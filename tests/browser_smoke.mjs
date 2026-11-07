@@ -1,7 +1,7 @@
 // Optional Windows UI check: Node 22+ and installed Chrome, no npm packages.
 // Start python -m backend first. Screenshots/downloads use a temporary folder.
 import { spawn } from 'node:child_process';
-import { access, mkdtemp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -112,6 +112,30 @@ async function run(task) {
   await assertIdentity(await evaluate('state.user.role'));
   return evaluate('state.result.analysis_id');
 }
+async function keepDocuments(names) {
+  await evaluate(`(() => {
+    let unwanted;
+    while ((unwanted = state.documents.find(d => !${JSON.stringify(names)}.includes(d.file_name)))) {
+      Array.from(document.querySelectorAll('.remove-document'))
+        .find(button => button.getAttribute('aria-label') === 'Remove ' + unwanted.file_name).click();
+    }
+  })()`);
+}
+async function assertPDFCitation() {
+  for (const width of [1440, 390, 320]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height: 1100, deviceScaleFactor: 1, mobile: width < 620 });
+    const label = await evaluate(`(() => {
+      const button = document.querySelector('.result-citation');
+      button.click();
+      return button.textContent;
+    })()`);
+    assert.match(label, /\.pdf, page \d+, lines? \d+/);
+    await waitFor(`state.documents[state.selected]?.format === 'pdf' && document.querySelector('.source-line.selected') && document.getElementById('sources').open`);
+    assert.ok(await evaluate(`document.querySelector('.source-line.selected').getAttribute('aria-label').includes('page')`));
+    assert.ok(await evaluate(`document.documentElement.scrollWidth <= innerWidth`), `PDF citation overflows at ${width}px`);
+  }
+  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
+}
 async function assertCitationLabelsAndLinks() {
   const expected = await evaluate('state.result.contradictions[0].citations');
   for (const width of [1440, 390, 320]) {
@@ -169,7 +193,11 @@ async function screenshot(name, fullPage = true) {
 async function downloaded(prefix) {
   for (let attempt = 0; attempt < 60; attempt++) {
     for (const filename of await readdir(downloads)) if (filename.startsWith(prefix) && filename.endsWith('.json')) {
-      return JSON.parse(await readFile(path.join(downloads, filename), 'utf8'));
+      let result;
+      try { result = JSON.parse(await readFile(path.join(downloads, filename), 'utf8')); }
+      catch (error) { if (error instanceof SyntaxError) continue; throw error; }
+      await unlink(path.join(downloads, filename));
+      return result;
     }
     await pause(100);
   }
@@ -211,6 +239,39 @@ try {
   await waitFor(`typeof state !== 'undefined' && state.user?.role === 'analyst' && !state.busy && !document.getElementById('login-button').disabled`);
   await assertIdentity('analyst');
   await click('demo-button');
+  await waitFor(`state.documents.length === 7 && !state.busy`);
+  assert.equal(await evaluate(`state.documents.filter(d => d.file_name.startsWith('DOC-')).length`), 4);
+  assert.equal(await evaluate(`state.documents.some(d => d.file_name.includes('police'))`), false);
+  const publicPDFName = 'DOC-002_statement_saaiem.pdf';
+  await keepDocuments([publicPDFName]);
+  const publicPDFId = await evaluate('state.documents[0].document_id');
+  const pdfRun = await run('brief');
+  await assertPDFCitation();
+  await click('result-download');
+  assert.equal((await downloaded(pdfRun)).claims[0].citations[0].page_references[0].page_number, 1);
+  await evaluate(`(() => {
+    const doc = state.documents[0];
+    const line = doc.lines.find(line => line.page_number === 2 && line.text.trim());
+    document.querySelector('[data-line="' + line.line_number + '"]').click();
+  })()`);
+  await click('copy-button');
+  await waitFor(`document.getElementById('notice').textContent.includes('Citation copied')`);
+  const pdfReference = JSON.parse(await evaluate('navigator.clipboard.readText()'));
+  assert.equal(pdfReference.page_references[0].page_number, 2);
+  assert.ok(pdfReference.line_start > 53);
+  await click('export-button');
+  const pdfExport = (await downloaded('icontinuum-documents')).documents[0];
+  assert.equal(pdfExport.page_count, 2);
+  assert.equal(pdfExport.format, 'pdf');
+  await click('clear-button');
+  await upload([path.resolve('sample_documents', publicPDFName)]);
+  await waitFor(`state.documents.length === 1 && !state.busy`);
+  assert.equal(await evaluate('state.documents[0].document_id'), publicPDFId);
+  await run('brief');
+  await assertPDFCitation();
+  await click('clear-button'); await click('demo-button');
+  await waitFor(`state.documents.length === 7 && !state.busy`);
+  await keepDocuments(['project_brief.txt', 'requirements.txt', 'meeting_notes.txt']);
   await waitFor(`document.getElementById('document-count').textContent === '03' && !state.busy`);
   assert.equal(await evaluate(`document.getElementById('line-count').textContent`), '30');
   assert.equal(await evaluate(`document.getElementById('sources').open`), false);
@@ -286,26 +347,42 @@ try {
   await screenshot('manager-mobile.png', false);
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
   await openDetails('sources');
-  await click('clear-button'); await click('demo-button'); await waitFor('state.documents.length === 4 && !state.busy');
+  await click('clear-button'); await click('demo-button'); await waitFor('state.documents.length === 9 && !state.busy');
+  assert.equal(await evaluate(`state.documents.filter(d => d.file_name.startsWith('DOC-')).length`), 5);
+  const policeName = 'DOC-005_police_report.pdf';
+  assert.equal(await evaluate(`state.documents.find(d => d.file_name === '${policeName}').access`), 'restricted');
+  await keepDocuments([policeName]);
+  const policeId = await evaluate('state.documents[0].document_id');
+  const policeRun = await run('brief');
+  await assertPDFCitation();
+  await evaluate(`document.getElementById('review-comment').value='Reviewed the synthetic PDF against extracted sources.'`);
+  await click('approve-button'); await waitFor(`state.result.review.status === 'approved' && !state.busy`);
+  await click('clear-button'); await click('demo-button'); await waitFor('state.documents.length === 9 && !state.busy');
+  await keepDocuments(['manager_notes.txt']);
   const restrictedId = await evaluate(`state.documents.find(d => d.access === 'restricted').document_id`);
   await openDetails('sources');
-  await evaluate(`for (let i=0;i<3;i++) document.querySelector('.remove-document').click()`);
   const restrictedRun = await run('brief');
   assert.ok(await evaluate(`JSON.stringify(state.result).includes('CEDAR-DEMO-742')`));
   await click('logout-button'); await waitFor('!state.user && !state.busy');
   assert.equal(await evaluate(`document.body.textContent.includes('CEDAR-DEMO-742')`), false);
   await login('analyst', 'AnalystDemo!2026');
-  for (const route of [`/api/documents/${restrictedId}`, `/api/analysis/${restrictedRun}`, `/api/analysis/${restrictedRun}/audit`]) {
+  for (const route of [`/api/documents/${restrictedId}`, `/api/analysis/${restrictedRun}`, `/api/analysis/${restrictedRun}/audit`,
+    `/api/documents/${policeId}`, `/api/analysis/${policeRun}`, `/api/analysis/${policeRun}/audit`]) {
     const denied = await evaluate(`fetch(${JSON.stringify(route)}).then(async r => ({status:r.status,body:await r.text()}))`);
     assert.equal(denied.status, 403); assert.ok(!denied.body.includes('CEDAR-DEMO-742'));
   }
+  const policeBase64 = (await readFile(path.resolve('sample_documents', policeName))).toString('base64');
+  const deniedUpload = await evaluate(`fetch('/api/documents', {method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({files:[{file_name:'ordinary.pdf',content_base64:${JSON.stringify(policeBase64)}}]})}).then(async r => ({status:r.status,body:await r.text()}))`);
+  assert.equal(deniedUpload.status, 403);
+  assert.ok(!deniedUpload.body.includes('Whitfield'));
   await assertMobileIdentity('analyst');
   await screenshot('narrow-layout.png');
   await upload([path.join(scratch, 'empty.txt')]);
   assert.equal(await evaluate(`document.getElementById('run-button').disabled`), true);
   assert.match(await evaluate(`document.getElementById('analysis-hint').textContent`), /No readable text/);
   assert.deepEqual(errors, []);
-  console.log('PASS: login, examples, uploads, extracts, conflicts, source links, clipboard, downloads, audit trail, Manager approve/reject, logout clearing, direct restricted API denial, and responsive layouts.');
+  console.log('PASS: TXT/PDF examples and uploads, PDF page citations and clipboard, police report permissions, login, extracts, conflicts, source links, downloads, audit trail, Manager approve/reject, logout clearing, direct restricted API denial, and responsive layouts.');
 } finally {
   if (ws?.readyState === WebSocket.OPEN) { await send('Browser.close').catch(() => {}); ws.close(); }
   for (const handler of pending.values()) clearTimeout(handler.timer);

@@ -143,14 +143,14 @@ class DocumentReaderTests(unittest.TestCase):
         self.assertEqual(result["text"], "")
         self.assertIsNone(result["document_id"])
 
-    def test_non_txt_files_are_rejected(self):
-        result = read_document(self.write_file(b"not supported", "document.pdf"))
+    def test_unsupported_files_are_rejected(self):
+        result = read_document(self.write_file(b"not supported", "document.docx"))
         self.assertEqual(result["error"]["code"], "unsupported_file_type")
         self.assertEqual(result["status"], "error")
 
     def test_all_three_synthetic_documents_have_valid_citations(self):
         folder = REPOSITORY_ROOT / "sample_documents"
-        results = [read_document(path) for path in sorted(folder.glob("*.txt"))]
+        results = [read_document(folder / name) for name in ("project_brief.txt", "requirements.txt", "meeting_notes.txt")]
         self.assertEqual(len(results), 3)
         self.assertEqual(len({result["document_id"] for result in results}), 3)
         for result in results:

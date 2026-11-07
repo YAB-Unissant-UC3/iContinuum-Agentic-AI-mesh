@@ -14,6 +14,9 @@ exact files used by the demo.
 A fourth synthetic file, `restricted/manager_notes.txt`, adds seven lines of
 Manager-only evidence. The manifest grants access before source text is returned.
 Original public files and their expected citation locations are unchanged.
+Five additional fictional story documents (two TXT, three PDFs) are now
+registered. The police report is Manager-only. See [PDF support](pdf-support.md)
+for the files, page counts, extraction checks, access tests, and limitations.
 
 | Document | Intended evidence |
 | --- | --- |
@@ -101,7 +104,8 @@ For the complete ten-minute authenticated scenario, follow the demo guide.
 
 - Small English-language synthetic examples do not establish performance on
   real, multilingual, lengthy, or adversarial document collections.
-- Only UTF-8 `.txt` input is supported. No PDF, Word, scanned-image, or OCR claims.
+- UTF-8 TXT and text PDFs are supported. No Word, scanned-image extraction, or OCR.
+  PDF page lines refer to extracted text, not printed line numbers. See [PDF evaluation](pdf-support.md).
 - IDs identify exact bytes. Git line-ending conversion or edits can create a
   new version ID. The example line numbers stay the same with CRLF or LF.
 - The HTTP prototype has documented upload limits and runs only locally. Data

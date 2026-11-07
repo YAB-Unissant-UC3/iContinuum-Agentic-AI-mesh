@@ -83,6 +83,10 @@ LOCAL_TYPE_FIELDS = {"root": "object", "claims": "array", "claim": "object",
     "citation": "object", "citation.document_id": "string", "citation.quote": "string",
     "citation.line_start": "integer", "citation.line_end": "integer"}
 LOCAL_TYPE_NAMES = frozenset({"object", "array", "string", "integer", "number", "boolean", "null", "unknown"})
+LOCAL_COUNT_SCHEMAS = {
+    "claims": BRIEF_SCHEMA["properties"]["claims"],
+    "claim.citations": BRIEF_SCHEMA["properties"]["claims"]["items"]["properties"]["citations"],
+}
 
 
 def _send_request(request, timeout):
@@ -90,7 +94,7 @@ def _send_request(request, timeout):
     return build_opener(_NoRedirect()).open(request, timeout=timeout)
 
 
-def _local_failure(stage, category, *, failure_field=None, actual_type=None):
+def _local_failure(stage, category, *, failure_field=None, actual_type=None, actual_count=None):
     """Emit fixed codes and known schema paths only, never model values/names."""
     stage = stage if isinstance(stage, str) and stage in LOCAL_FAILURE_STAGES else "local_processing"
     category = category if isinstance(category, str) and category in LOCAL_FAILURE_CATEGORIES else "validation_failed"
@@ -100,6 +104,12 @@ def _local_failure(stage, category, *, failure_field=None, actual_type=None):
             and isinstance(actual_type, str) and actual_type in LOCAL_TYPE_NAMES):
         diagnostics.update(failure_field=failure_field, expected_type=LOCAL_TYPE_FIELDS[failure_field],
                            actual_type=actual_type)
+    if (stage == "structure_validation" and category == "count_limit"
+            and isinstance(failure_field, str) and failure_field in LOCAL_COUNT_SCHEMAS
+            and type(actual_count) is int and actual_count >= 0):
+        schema = LOCAL_COUNT_SCHEMAS[failure_field]
+        diagnostics.update(failure_field=failure_field, actual_count=actual_count,
+                           minimum_count=schema["minItems"], maximum_count=schema["maxItems"])
     return ProviderUnavailable("invalid_response", diagnostics)
 
 
@@ -178,7 +188,7 @@ def validate_brief_payload(payload):
     if not isinstance(claims, list):
         reject_type("claims", claims)
     if not claim_schema["minItems"] <= len(claims) <= claim_schema["maxItems"]:
-        reject("count_limit")
+        raise _local_failure("structure_validation", "count_limit", failure_field="claims", actual_count=len(claims))
     for claim in claims:
         fields(claim, {"section", "text", "citations"}, "claim")
         if not isinstance(claim["section"], str):
@@ -191,7 +201,8 @@ def validate_brief_payload(payload):
         if not isinstance(citations, list):
             reject_type("claim.citations", citations)
         if not citation_schema["minItems"] <= len(citations) <= citation_schema["maxItems"]:
-            reject("count_limit")
+            raise _local_failure("structure_validation", "count_limit",
+                                 failure_field="claim.citations", actual_count=len(citations))
         for cite in citations:
             fields(cite, {"document_id", "line_start", "line_end", "quote"}, "citation")
             check_text(cite["document_id"], 128, "citation.document_id")
