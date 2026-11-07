@@ -5,13 +5,27 @@ share evidence through a Python backend for a Brief Generator and a Requirements
 Checker:
 
 1. **Document Reader:** extracts original text, document IDs, and source lines.
-2. **Analysis Agent (planned):** analyzes evidence and produces cited results.
-3. **Audit Agent (planned):** verifies citations and records audit information.
+2. **Analysis Agent:** produces cited source extracts and flags explicit retention conflicts.
+3. **Audit Agent:** validates exact evidence support and records audit information.
 
 The local prototype includes the Document Reader, a browser workspace, and a
-Python API. Analysis and audit integration are pending. It runs without an LLM,
-external API, third-party Python packages, or a frontend build step. The API is
+Python API, authentication, role permissions, and Manager review. It runs in
+**deterministic demo mode by default**, with a backend-only AI Brief Generator:
+Groq GPT OSS 20B is preferred when configured, and Gemini is optional.
+Both preserve deterministic fallback. No third-party Python packages
+or frontend build step are needed. Live generation requires explicit opt-in.
+The API is
 independent of model choice; it does not require Unissant's model.
+
+**Start here:** [full-workflow demo guide](docs/demo-guide.md), including exact
+commands, demo credentials, document swapping, limitations, and a ten-minute
+presentation sequence. No database or new Python dependencies are needed.
+
+See [AI providers](docs/ai-providers.md) for selection, configuration, audit/review
+semantics, mocked tests, and startup steps. [Gemini Phase 1](docs/gemini-phase1.md)
+retains the optional Gemini details. No live provider request
+has been made during implementation. The Requirements Checker remains
+deterministic; [Phase 2](docs/phase2-plan.md) is a plan only.
 
 ## Open the local frontend and API
 
@@ -29,23 +43,30 @@ The **frontend** is the page you interact with. The **API** is the Python layer
 that receives its requests and calls the reader. One Python command starts
 both; Node.js, npm, and extra Python packages are not needed to use the app.
 
-You can upload UTF-8 `.txt` files, load all three fictional examples, inspect
+Sign in as `analyst` / `AnalystDemo!2026` or `manager` / `ManagerDemo!2026`.
+These are synthetic local-demo accounts, not production credentials.
+
+You can upload UTF-8 `.txt` files, load authorized fictional examples, inspect
 numbered lines, copy a source citation (Shift-click for a range), remove files,
 and download JSON. Select Brief Generator or Requirements Checker to download
-an analysis request for your teammate. Those applications do not generate
-results until the real Analysis Agent is integrated. Citation verification
-also awaits the Audit Agent.
+an analysis request or run the integrated analysis. Each result includes cited
+extracts, audit status, and pending human review. Managers can reopen runs,
+approve/reject them with notes, and access restricted synthetic documents.
+The Requirements Checker flags the sample's 30-day versus 90-day retention
+conflict. Matching words alone never count as proof of compliance.
 
-Uploads stay in memory and are not written to disk. Refreshing clears the
-workspace. Limits are 12 documents, 256 KiB and 10,000 lines per file, and
+Uploads and results stay in server memory until restart; refreshing clears
+the page view, and saved runs can be reopened after login. Audit metadata
+persists in the ignored `.runtime/audit.jsonl` file. Limits are 12 documents,
+256 KiB and 10,000 lines per file, and
 2 MiB total per upload request. Identical contents are skipped in the browser.
 
-- [Team API contract and proposed analysis output](docs/api-contract.md)
+- [Full-workflow demo guide](docs/demo-guide.md)
+- [Team API contract and analysis output](docs/api-contract.md)
 - [Synthetic data, evaluation method, and limitations](docs/evaluation.md)
 
 The challenge organizers do not supply a common schema, dataset, or answer key;
-these documents describe our own proposal. Share the contract with teammates
-before connecting their agents. The connection point is
+these documents describe our implementation and evaluation. The connection point is
 `backend/analysis.py::analyze_documents()`.
 
 ### Folder guide
@@ -54,7 +75,8 @@ before connecting their agents. The connection point is
 backend/             Local server, upload API, and analysis connection point
 frontend/            HTML page, CSS styling, and browser JavaScript
 document_reader/     Shared extraction code and original command-line reader
-sample_documents/    Three fictional source documents
+mesh/                Existing deterministic agents and retention-conflict rules
+sample_documents/    Original three sources, restricted example, access manifest
 tests/               Reader and HTTP API tests
 docs/                Team interface contract and evaluation notes
 ```
@@ -210,10 +232,17 @@ notes for the manual browser checklist.
 
 This version reads UTF-8 `.txt` files into memory and exposes the reader through
 a local browser workspace and API. It does not yet support PDFs, Word documents,
-OCR, automatic folder scanning, large-file streaming, saved workspaces, or user
-accounts. The server is a local development prototype, not a production hosting
-setup. It does not summarize, analyze, or verify claims. Those responsibilities
-belong to the later agents.
+OCR, automatic folder scanning, large-file streaming, durable workspaces, or
+production accounts. The server is a local development prototype. Summaries
+are capped at 12 verbatim extracts; conflict detection covers explicit retention
+durations only. Audit validates exact single-line extracts and the supported
+rules, not general semantic truth. See the demo guide for full limitations.
+## Original project proposal (historical)
+
+The notes below are retained from the original team proposal. Technology and
+status statements in this section describe that earlier plan, not the current
+demo. The implemented workflow and run instructions above take precedence.
+
 Unissant Challenge X — iContinuum Agentic AI Mesh
 
 Project Overview:

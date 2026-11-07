@@ -6,10 +6,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import re
+import socket
+import time
 from urllib.parse import urlsplit
 
-from document_reader import read_document, read_document_bytes
-from .analysis import AnalysisUnavailable, analyze_documents
+from document_reader import read_document_bytes
+from .analysis import analyze_documents
+from .security import authenticate, cookie_header, new_session, session_token
+from .workspace import Workspace, WorkspaceError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +27,8 @@ STATIC_FILES = {
     "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/styles.css": ("styles.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/fonts/dm-serif-display-latin.woff2": ("fonts/dm-serif-display-latin.woff2", "font/woff2"),
+    "/fonts/manrope-latin.woff2": ("fonts/manrope-latin.woff2", "font/woff2"),
 }
 
 
@@ -81,7 +87,7 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         # Do not log uploaded document contents or user-supplied URL paths.
         pass
 
-    def _send(self, status, body, content_type="application/json; charset=utf-8"):
+    def _send(self, status, body, content_type="application/json; charset=utf-8", headers=()):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -89,11 +95,23 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+        for name, value in headers:
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
-    def _json(self, status, payload):
-        self._send(status, json.dumps(payload, ensure_ascii=True, allow_nan=False).encode("utf-8"))
+    def _json(self, status, payload, headers=()):
+        self._send(status, json.dumps(payload, ensure_ascii=True, allow_nan=False).encode("utf-8"), headers=headers)
+
+    def _user(self, required=True):
+        workspace = self.server.workspace
+        with workspace.lock:
+            session = workspace.sessions.get(session_token(self.headers))
+            if session and session["expires"] > time.time():
+                return dict(session["user"])
+        if required:
+            raise RequestError("authentication_required", "Sign in before accessing documents or analyses.", 401)
+        return None
 
     def _error(self, error):
         self._json(error.status, {"api_version": "1.0", "error": {
@@ -119,19 +137,46 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
             self._check_local_request()
             path = urlsplit(self.path).path
             if path == "/api/health":
+                generator = self.server.brief_generator
+                ai_enabled = bool(generator is not None and generator.enabled)
+                provider = getattr(generator, "provider", "gemini") if ai_enabled else None
+                mode = provider + "_with_fallback" if ai_enabled else "deterministic_demo"
                 self._json(200, {
                     "api_version": "1.0", "status": "ok",
-                    "agents": {"reader": "ready", "analysis": "not_connected", "audit": "not_connected"},
+                    "agents": {"reader": "ready", "analysis": mode, "audit": "ready"},
+                    "mode": mode, "authentication_required": True,
+                    "brief_provider": provider,
+                    "brief_model": getattr(generator, "public_model", generator.model) if ai_enabled else None,
                     "limits": {"max_files": MAX_FILES, "max_file_bytes": MAX_FILE_BYTES,
                                "max_total_bytes": MAX_TOTAL_BYTES, "max_lines_per_file": MAX_LINES_PER_FILE},
                 })
-            elif path == "/api/demo":
-                documents = [read_document(ROOT / "sample_documents" / name) for name in (
-                    "project_brief.txt", "requirements.txt", "meeting_notes.txt",
-                )]
-                for document in documents:
-                    document["source_path"] = "sample_documents/" + document["file_name"]
-                self._json(200, _documents_response(documents))
+            elif path == "/api/session":
+                self._json(200, {"api_version": "1.0", "user": self._user(required=False)})
+            elif path.startswith("/api/"):
+                user = self._user()
+                workspace = self.server.workspace
+                with workspace.lock:
+                    if path in ("/api/demo", "/api/documents"):
+                        result = _documents_response(workspace.list_documents(user, demo_only=path == "/api/demo"))
+                    elif path.startswith("/api/documents/"):
+                        result = {"api_version": "1.0", "document": workspace.document(path.split("/")[-1], user)}
+                    elif path == "/api/analyses":
+                        runs = []
+                        for identifier in workspace.runs:
+                            try:
+                                run = workspace.run(identifier, user)
+                            except WorkspaceError:
+                                continue
+                            runs.append({"analysis_id": identifier, "task": run["task"],
+                                         "created_at": run["created_at"], "review": run["review"]["status"]})
+                        result = {"api_version": "1.0", "analyses": list(reversed(runs))}
+                    elif re.fullmatch(r"/api/analysis/run_[a-f0-9]{32}(?:/audit)?", path):
+                        identifier = path.split("/")[3]
+                        result = ({"api_version": "1.0", "events": workspace.audit_trail(identifier, user)}
+                                  if path.endswith("/audit") else workspace.run(identifier, user))
+                    else:
+                        raise RequestError("not_found", "This route does not exist.", 404)
+                self._json(200, result)
             elif path in STATIC_FILES:
                 name, content_type = STATIC_FILES[path]
                 self._send(200, (ROOT / "frontend" / name).read_bytes(), content_type)
@@ -139,8 +184,10 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 self._send(204, b"", "image/x-icon")
             else:
                 raise RequestError("not_found", "This route does not exist.", 404)
-        except RequestError as exc:
+        except (RequestError, WorkspaceError) as exc:
             self._error(exc)
+        except OSError:
+            self._error(RequestError("storage_error", "Cannot read the local workspace files.", 503))
 
     def _read_json(self):
         if self.headers.get("Transfer-Encoding") is not None:
@@ -172,26 +219,71 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
         try:
             self._check_local_request()
             path = urlsplit(self.path).path
-            if path not in {"/api/documents", "/api/analysis"}:
+            review_route = re.fullmatch(r"/api/analysis/(run_[a-f0-9]{32})/review", path)
+            if path not in {"/api/documents", "/api/analysis", "/api/login", "/api/logout"} and not review_route:
                 raise RequestError("not_found", "This route does not exist.", 404)
+            user = self._user() if path not in ("/api/login", "/api/logout") else None
             payload = self._read_json()
-            if path == "/api/documents":
-                self._json(200, _read_uploads(payload))
-            else:
+            workspace = self.server.workspace
+            if path == "/api/analysis":
                 if payload.get("task") not in ("brief", "requirements"):
                     raise RequestError("invalid_task", "task must be brief or requirements.")
-                if not isinstance(payload.get("documents"), list) or not payload["documents"]:
-                    raise RequestError("invalid_documents", "Provide extracted documents.")
-                try:
-                    result = analyze_documents(payload)
-                except AnalysisUnavailable as exc:
-                    raise RequestError("analysis_not_connected", str(exc), 501)
-                # The real agent and its output validation will be integrated together.
+                with workspace.lock:
+                    user = self._user()
+                    request = workspace.resolve_analysis(payload, user)
+                # No workspace-wide lock is held while waiting on the provider.
+                result = analyze_documents(request, brief_generator=self.server.brief_generator)
+                with workspace.lock:
+                    user = self._user()
+                    workspace.resolve_analysis(payload, user)
+                    workspace.save_run(result, user)
                 self._json(200, result)
-        except RequestError as exc:
+                return
+            with workspace.lock:
+                if path == "/api/login":
+                    user = authenticate(payload.get("username"), payload.get("password"))
+                    if not user:
+                        raise RequestError("invalid_credentials", "Incorrect demo username or password.", 401)
+                    workspace.sessions.pop(session_token(self.headers), None)
+                    token = new_session(workspace.sessions, user)
+                    self._json(200, {"api_version": "1.0", "user": user}, [("Set-Cookie", cookie_header(token))])
+                    return
+                if path == "/api/logout":
+                    workspace.sessions.pop(session_token(self.headers), None)
+                    self._json(200, {"api_version": "1.0", "user": None}, [("Set-Cookie", cookie_header("", logout=True))])
+                    return
+                if path == "/api/documents":
+                    access = payload.get("access", "public")
+                    if access == "restricted" and user["role"] != "manager":
+                        raise RequestError("access_denied", "Only Managers can register restricted uploads.", 403)
+                    uploaded = _read_uploads(payload)["documents"]
+                    result = _documents_response(workspace.register(uploaded, access, user))
+                elif review_route:
+                    result = workspace.review(review_route[1], payload, user)
+            self._json(200, result)
+        except (RequestError, WorkspaceError) as exc:
             self._error(exc)
+        except ValueError as exc:
+            self._error(RequestError("invalid_analysis", str(exc)))
+        except OSError:
+            self._error(RequestError("audit_storage_error", "Cannot write the local audit trail. Check the runtime directory.", 503))
 
 
-def create_server(port=8000):
+class WorkspaceHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = False
+    allow_reuse_port = False
+
+    def server_bind(self):
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
+def create_server(port=8000, data_dir=None, sample_dir=None, brief_generator=None):
     """Bind only to this computer; port 0 is useful for automated tests."""
-    return ThreadingHTTPServer(("127.0.0.1", port), WorkspaceHandler)
+    workspace = Workspace(sample_dir or ROOT / "sample_documents", data_dir or ROOT / ".runtime")
+    server = WorkspaceHTTPServer(("127.0.0.1", port), WorkspaceHandler)
+    server.workspace = workspace
+    # Tests and internal callers are deterministic unless a provider is injected.
+    server.brief_generator = brief_generator
+    return server

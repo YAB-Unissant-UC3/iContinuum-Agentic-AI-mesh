@@ -1,8 +1,9 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
-const state = { documents: [], selected: -1, view: 'source', start: null, end: null, task: 'brief', busy: false };
+const state = { documents: [], selected: -1, view: 'source', start: null, end: null, task: 'brief', busy: false, user: null, result: null, aiConfigured: false };
 const limits = { max_files: 12, max_file_bytes: 256 * 1024, max_total_bytes: 2 * 1024 * 1024 };
+let initializing = true;
 
 function notice(message, error = false) {
   $('notice').textContent = message;
@@ -13,7 +14,10 @@ function notice(message, error = false) {
 async function request(path, options) {
   const response = await fetch(path, options);
   const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error?.message || 'The request could not be completed.');
+  if (!response.ok) {
+    if (response.status === 401 && state.user) setUser(null);
+    throw new Error(payload.error?.message || 'The request could not be completed.');
+  }
   return payload;
 }
 
@@ -26,7 +30,17 @@ function element(tag, className, text) {
 
 function busy(value) {
   state.busy = value;
-  for (const id of ['browse-button', 'demo-button', 'file-input']) $(id).disabled = value;
+  for (const id of ['browse-button', 'demo-button', 'file-input', 'refresh-runs-button']) $(id).disabled = value || !state.user;
+  for (const id of ['login-button', 'username', 'password', 'logout-button', 'upload-access']) $(id).disabled = value || initializing;
+  $('run-button').disabled = value || !state.user || !state.documents.some((doc) => doc.status === 'ok');
+  const readable = state.documents.filter((doc) => doc.status === 'ok').length;
+  $('analysis-hint').textContent = value ? 'Please wait...'
+    : readable ? `Uses all ${readable} readable document${readable === 1 ? '' : 's'}.`
+      : state.documents.length ? 'No readable text. Add a non-empty .txt file.' : 'Add documents above to enable analysis.';
+  $('load-run-button').disabled = value || !state.user || !$('analysis-history').value;
+  $('analysis-history').disabled = value || !state.user || $('analysis-history').options.length < 2;
+  $('approve-button').disabled = value || !canApprove(state.result);
+  $('reject-button').disabled = value || !state.result;
   $('clear-button').disabled = value || !state.documents.length;
   $('dropzone').setAttribute('aria-busy', String(value));
   document.querySelectorAll('.remove-document').forEach((button) => { button.disabled = value; });
@@ -65,7 +79,7 @@ function renderSelection() {
   $('copy-button').disabled = !reference;
   $('citation-hint').textContent = reference
     ? `Line${reference.line_start === reference.line_end ? '' : 's'} ${reference.line_start}${reference.line_start === reference.line_end ? '' : `–${reference.line_end}`} selected · Shift-click another line for a range.`
-    : 'Select a source line to create a citation.';
+    : 'Select a line to copy its source reference.';
   for (const row of $('source-lines').children) {
     const number = Number(row.dataset.line);
     const selected = Boolean(reference && number >= reference.line_start && number <= reference.line_end);
@@ -77,7 +91,7 @@ function renderSelection() {
 function renderViewer() {
   const source = state.documents[state.selected];
   const hasLines = Boolean(source?.lines.length);
-  $('viewer-name').textContent = source?.file_name || 'Source preview';
+  $('viewer-name').textContent = source?.file_name || 'Document text';
   $('source-meta').hidden = !source;
   $('source-meta').textContent = source?.document_id || 'No source ID available';
   $('json-preview').hidden = !source || state.view !== 'json';
@@ -86,8 +100,8 @@ function renderViewer() {
   $('viewer-empty').hidden = Boolean(source && (state.view === 'json' || hasLines));
   const title = $('viewer-empty').querySelector('h3');
   const description = $('viewer-empty').querySelector('h3 + p');
-  title.textContent = source?.status === 'error' ? 'This document could not be read.' : source?.status === 'empty' ? 'This document is empty.' : 'No source selected.';
-  description.textContent = source?.error?.message || (source?.status === 'empty' ? 'The file has a stable ID, but contains no source lines.' : 'Upload a text file or load the sample documents to view numbered lines.');
+  title.textContent = source?.status === 'error' ? 'Could not read this document' : source?.status === 'empty' ? 'This document is empty' : 'Select a document';
+  description.textContent = source?.error?.message || (source?.status === 'empty' ? 'Add a file with text to include it in analysis.' : 'Choose a document to see its text and line numbers.');
   $('source-tab').setAttribute('aria-pressed', String(state.view === 'source'));
   $('json-tab').setAttribute('aria-pressed', String(state.view === 'json'));
   const fragment = document.createDocumentFragment();
@@ -114,6 +128,9 @@ function render() {
   $('ready-count').textContent = String(ready.length).padStart(2, '0');
   $('library-count').textContent = state.documents.length;
   $('library-empty').hidden = state.documents.length > 0;
+  $('document-summary').hidden = !state.documents.length;
+  $('sources').hidden = !state.documents.length;
+  if (!state.documents.length) $('sources').open = false;
   $('export-button').disabled = !state.documents.length;
   $('clear-button').disabled = state.busy || !state.documents.length;
   $('request-button').disabled = !ready.length;
@@ -123,8 +140,8 @@ function render() {
     const select = element('button', 'document-select');
     select.setAttribute('aria-pressed', String(index === state.selected));
     const info = element('span', 'document-info');
-    const label = source.status === 'error' ? 'Could not read file' : source.status === 'empty' ? 'Empty file' : `${source.line_count} source lines`;
-    info.append(element('span', 'document-name', source.file_name), element('span', `document-subtitle${source.status === 'error' ? ' has-error' : ''}`, label));
+    const label = source.status === 'error' ? 'Could not read file' : source.status === 'empty' ? 'Empty file' : `${source.line_count} lines`;
+    info.append(element('span', 'document-name', source.file_name), element('span', `document-subtitle${source.status === 'error' ? ' has-error' : ''}`, `${label}${source.access === 'restricted' ? ' / Manager only' : ''}`));
     const documentNumber = element('span', 'document-index', String(index + 1).padStart(2, '0'));
     documentNumber.setAttribute('aria-hidden', 'true');
     select.append(documentNumber, info);
@@ -144,6 +161,7 @@ function render() {
   });
   $('document-list').replaceChildren(fragment);
   renderViewer();
+  busy(state.busy);
 }
 
 function base64(bytes) {
@@ -155,7 +173,7 @@ function base64(bytes) {
 }
 
 async function uploadFiles(fileList) {
-  if (state.busy || !fileList.length) return;
+  if (state.busy || !state.user || !fileList.length) return;
   const files = Array.from(fileList);
   if (files.length + state.documents.length > limits.max_files) return notice('Keep up to 12 documents in the workspace. Remove a document before adding more.', true);
   if (files.some((file) => !file.name.toLowerCase().endsWith('.txt'))) return notice('Choose .txt files saved as UTF-8.', true);
@@ -165,7 +183,7 @@ async function uploadFiles(fileList) {
   notice('Reading your documents…');
   try {
     const uploads = await Promise.all(files.map(async (file) => ({ file_name: file.name, content_base64: base64(new Uint8Array(await file.arrayBuffer())) })));
-    const payload = await request('/api/documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files: uploads }) });
+    const payload = await request('/api/documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files: uploads, access: $('upload-access').value }) });
     addDocuments(payload.documents);
   } catch (error) { notice(`Could not read the documents. ${error.message}`, true); }
   finally { busy(false); $('file-input').value = ''; }
@@ -196,45 +214,317 @@ $('dropzone').addEventListener('drop', (event) => uploadFiles(event.dataTransfer
 window.addEventListener('dragover', (event) => event.preventDefault());
 window.addEventListener('drop', (event) => event.preventDefault());
 $('demo-button').addEventListener('click', async () => {
-  if (state.documents.length > limits.max_files - 3) return notice('Make room for three example documents first.', true);
-  busy(true); notice('Loading the fictional examples…');
+  if (!state.user || state.busy) return;
+  if (state.documents.length > limits.max_files - 4) return notice('Make room for the example documents first.', true);
+  busy(true); notice('Loading sample documents...');
   try { addDocuments((await request('/api/demo')).documents); }
   catch (error) { notice(`Could not load examples. ${error.message}`, true); }
   finally { busy(false); }
 });
 $('clear-button').addEventListener('click', () => {
   state.documents = []; state.selected = -1; state.start = null; state.end = null;
-  render(); notice('Workspace cleared. Original files are unchanged.');
+  state.result = null; renderResult();
+  render(); notice('Documents cleared.');
 });
 for (const view of ['source', 'json']) $(`${view}-tab`).addEventListener('click', () => { state.view = view; renderViewer(); });
 $('copy-button').addEventListener('click', async () => {
   const reference = citation();
   if (!reference) return;
-  try { await navigator.clipboard.writeText(JSON.stringify(reference, null, 2)); notice('Citation copied. It identifies source lines; claim verification is still pending.'); }
+  try { await navigator.clipboard.writeText(JSON.stringify(reference, null, 2)); notice('Citation copied.'); }
   catch { notice(`Clipboard unavailable. Copy this reference: ${JSON.stringify(reference)}`); }
 });
 $('export-button').addEventListener('click', () => download('icontinuum-documents.json', { api_version: '1.0', documents: state.documents }));
 $('request-button').addEventListener('click', () => download('icontinuum-analysis-request.json', {
-  api_version: '1.0', task: state.task, documents: state.documents.filter((item) => item.status === 'ok'),
+  api_version: '1.0', task: state.task, documents: state.documents.filter((item) => item.status === 'ok'), requirements: requirements(),
 }));
 for (const task of ['brief', 'requirements']) $(`${task}-task`).addEventListener('click', () => {
   state.task = task;
   $('brief-task').setAttribute('aria-pressed', String(task === 'brief'));
   $('requirements-task').setAttribute('aria-pressed', String(task === 'requirements'));
-  $('task-description').textContent = task === 'brief' ? 'Prepare documents for a cited brief.' : 'Prepare documents for requirements review.';
+  $('requirements-label').hidden = task !== 'requirements';
+  $('task-description').textContent = task === 'brief' ? 'Create a brief with sources.' : 'Find evidence for each requirement. Matches do not prove compliance.';
+  renderMode();
 });
+function renderMode() {
+  $('mode-banner').textContent = state.aiConfigured && state.task === 'brief'
+    ? 'Briefs try AI first. Each result shows whether AI was used.'
+    : 'Demo mode: uses document extracts instead of live AI.';
+}
 async function checkConnection() {
   try {
     const health = await request('/api/health');
     Object.assign(limits, health.limits);
-    $('connection-label').textContent = 'Reader connected';
+    $('connection-label').textContent = 'System ready';
     $('reader-status').textContent = 'Connected locally';
+    const configured = ['gemini_with_fallback', 'groq_with_fallback'].includes(health.mode);
+    const provider = health.brief_provider === 'groq' ? 'Groq' : 'Gemini';
+    state.aiConfigured = configured;
+    $('analysis-status').textContent = configured ? `${provider} / ${health.brief_model}` : 'Demo mode';
+    $('audit-agent-status').textContent = 'Source checks enabled';
+    renderMode();
   } catch {
-    $('connection-label').textContent = 'API unavailable';
+    $('connection-label').textContent = 'System unavailable';
     $('connection-dot').classList.add('offline');
     $('reader-status').textContent = 'Connection unavailable';
     notice('Cannot reach the local API. Start python -m backend, then refresh this page.', true);
   }
 }
+
+function post(path, payload) {
+  return request(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+}
+
+function canApprove(result) {
+  if (!result) return false;
+  const audit = result.audit;
+  return audit.status === 'passed' || (['gemini', 'groq'].includes(result.mode) && audit.status === 'needs_review'
+    && audit.flags.length > 0 && audit.flags.every((flag) => flag.severity === 'warning'));
+}
+
+function requirements() {
+  return state.task === 'requirements' ? $('requirements-input').value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) : [];
+}
+
+function setUser(user) {
+  state.user = user;
+  state.documents = []; state.result = null; state.selected = -1; state.start = null; state.end = null;
+  state.view = 'source';
+  $('session-panel').hidden = Boolean(user);
+  $('workspace').hidden = !user;
+  $('workspace-sidebar').hidden = !user;
+  document.body.dataset.authenticated = String(Boolean(user));
+  for (const id of ['sources', 'saved-results', 'run-details']) $(id).open = false;
+  $('logout-button').hidden = !user;
+  // Presentation only: the role comes from the authenticated API response.
+  // Existing server permissions remain authoritative for every request.
+  $('session-identity').hidden = !user;
+  $('signed-out-label').hidden = Boolean(user);
+  $('signed-in-user').textContent = user?.role === 'manager' ? 'Manager'
+    : user?.role === 'analyst' ? 'Analyst' : user ? 'Authenticated user' : 'Signed out';
+  $('session-username').textContent = user?.username || '';
+  $('analyst-icon').toggleAttribute('hidden', user?.role !== 'analyst');
+  $('manager-icon').toggleAttribute('hidden', user?.role !== 'manager');
+  $('upload-access-label').hidden = user?.role !== 'manager';
+  $('upload-access').value = 'public';
+  $('review-comment').value = '';
+  $('requirements-input').value = 'audit records\nquantum encryption';
+  $('password').value = '';
+  $('analysis-history').replaceChildren(element('option', '', 'No saved results'));
+  $('analysis-history').firstChild.value = '';
+  render(); renderResult();
+}
+
+async function refreshRuns() {
+  if (!state.user) return;
+  const previous = state.result?.analysis_id || $('analysis-history').value;
+  const payload = await request('/api/analyses');
+  const placeholder = element('option', '', payload.analyses.length ? 'Select a saved result' : 'No saved results');
+  placeholder.value = '';
+  const options = payload.analyses.map((run) => {
+    const option = element('option', '', `${run.task === 'brief' ? 'Brief' : 'Requirements'} / ${run.review.replaceAll('_', ' ')} / ${run.analysis_id.slice(0, 12)}`);
+    option.value = run.analysis_id;
+    return option;
+  });
+  $('analysis-history').replaceChildren(placeholder, ...options);
+  $('analysis-history').value = previous;
+  if (!$('analysis-history').value && options.length) $('analysis-history').value = options[0].value;
+  busy(state.busy);
+}
+
+async function showCitation(cite) {
+  try {
+    const source = (await request(`/api/documents/${encodeURIComponent(cite.document_id)}`)).document;
+    let index = state.documents.findIndex((item) => item.document_id === cite.document_id);
+    if (index < 0) {
+      if (state.documents.length >= limits.max_files) state.documents.pop();
+      index = state.documents.push(source) - 1;
+    } else state.documents[index] = source;
+    state.selected = index; state.start = cite.line_start; state.end = cite.line_end; state.view = 'source';
+    render();
+    $('sources').open = true;
+    $('sources').scrollIntoView({ block: 'start' });
+    $('source-lines').querySelector(`[data-line="${cite.line_start}"]`)?.scrollIntoView({ block: 'nearest' });
+  } catch (error) { notice(error.message, true); }
+}
+
+function citationButtons(citations) {
+  const links = element('div', 'result-citations');
+  for (const cite of citations || []) {
+    const name = state.documents.find((doc) => doc.document_id === cite.document_id)?.file_name || cite.document_id;
+    const range = cite.line_start === cite.line_end ? `line ${cite.line_start}` : `lines ${cite.line_start}–${cite.line_end}`;
+    const button = element('button', 'text-button result-citation', `${name}, ${range}`);
+    button.title = `${cite.document_id}: ${cite.quote}`;
+    button.addEventListener('click', () => showCitation(cite));
+    // Preserve word boundaries when labels are copied or read without CSS.
+    if (links.childNodes.length) links.append(document.createTextNode(' '));
+    links.append(button);
+  }
+  return links;
+}
+
+function setAuditTrailOpen(open) {
+  $('audit-trail').hidden = !open;
+  $('trail-button').textContent = open ? 'Hide audit trail' : 'Show audit trail';
+  $('trail-button').setAttribute('aria-expanded', String(open));
+}
+
+function renderResult() {
+  const result = state.result;
+  $('analysis-result').hidden = !result;
+  $('result-content').replaceChildren();
+  setAuditTrailOpen(false);
+  $('audit-trail').textContent = '';
+  $('result-meta').textContent = '';
+  $('result-status').textContent = '';
+  $('result-kind').textContent = '';
+  $('result-kind').removeAttribute('data-generation');
+  $('result-mode-explanation').textContent = '';
+  $('results-empty').hidden = Boolean(result);
+  $('review-comment').value = '';
+  $('manager-review').hidden = !result || state.user?.role !== 'manager';
+  $('manager-nav').hidden = !result || state.user?.role !== 'manager';
+  $('approval-hint').hidden = !result || canApprove(result);
+  $('review-readonly').hidden = state.user?.role === 'manager';
+  if (!result) return;
+  const generated = ['gemini', 'groq'].includes(result.mode);
+  $('result-kind').dataset.generation = generated ? 'ai' : 'deterministic';
+  $('result-kind').textContent = generated
+    ? 'AI-generated draft' : result.fallback_reason ? 'Demo mode / AI not used' : 'Demo mode';
+  $('result-mode-explanation').textContent = generated
+    ? 'Check statements against their sources before approving.'
+    : result.fallback_reason ? 'AI was not used for this run. Results use document extracts.'
+      : 'Uses document extracts instead of live AI.';
+  $('result-heading').textContent = result.task === 'brief' ? 'Brief' : 'Requirements';
+  $('result-meta').textContent = `${result.mode_label}${result.model ? ` / ${result.model}` : ''} / ${result.analysis_id}${result.fallback_reason ? ` / fallback: ${result.fallback_reason}` : ''}`;
+  $('result-status').textContent = `Source checks: ${result.audit.status.replaceAll('_', ' ')}. Manager review: ${result.review.status.replaceAll('_', ' ')}.${result.review.comment ? ` Note: ${result.review.comment}` : ''}`;
+  const content = $('result-content');
+  if (!generated) content.append(element('h4', '', 'Findings'));
+  if (!result.claims.length) content.append(element('p', 'muted', 'No matching text found. This does not prove a requirement is unmet.'));
+  let section = '';
+  for (const claim of result.claims) {
+    if (generated && claim.section !== section) {
+      section = claim.section;
+      content.append(element('h4', '', section));
+    }
+    const item = element('article', 'result-item');
+    item.append(element('p', '', claim.text), citationButtons(claim.citations));
+    content.append(item);
+  }
+  if (result.task === 'requirements' || result.contradictions.length) {
+    content.append(element('h4', '', 'Conflicting information'));
+    if (!result.contradictions.length) content.append(element('p', 'muted', 'No audit-retention conflict found by the demo checks. Other conflicts may exist.'));
+    for (const conflict of result.contradictions) {
+      const item = element('article', 'result-item');
+      item.append(element('p', '', conflict.description), citationButtons(conflict.citations));
+      content.append(item);
+    }
+  }
+  if (result.task === 'requirements') {
+    content.append(element('h4', '', 'Requirements'));
+    for (const check of result.requirement_checks) {
+      const item = element('article', 'result-item');
+      item.append(element('strong', '', `${check.text}: ${check.status}`), element('p', 'muted', check.explanation), citationButtons(check.citations));
+      content.append(item);
+    }
+  }
+  content.append(element('h4', '', 'Warnings and checks'));
+  if (!result.audit.flags.length) content.append(element('p', 'muted', 'No source-reference errors found. Checks do not prove every statement is supported.'));
+  for (const flag of result.audit.flags) content.append(element('p', 'audit-flag', `${flag.severity || 'error'} / ${flag.code} / ${flag.target}: ${flag.message}`));
+  content.append(element('h4', '', 'Limitations'));
+  const limitations = element('ul', 'result-limitations');
+  for (const text of result.limitations) limitations.append(element('li', '', text));
+  content.append(limitations);
+  busy(state.busy);
+}
+
+$('login-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const credentials = { username: $('username').value.trim(), password: $('password').value };
+  busy(true);
+  try {
+    const payload = await post('/api/login', credentials);
+    setUser(payload.user);
+    await refreshRuns();
+    notice('');
+    $('add-heading').focus({ preventScroll: true });
+    window.scrollTo(0, 0);
+  } catch (error) { notice(error.message, true); }
+  finally { $('password').value = ''; busy(false); }
+});
+$('logout-button').addEventListener('click', async () => {
+  busy(true);
+  try { await post('/api/logout', {}); setUser(null); notice('Signed out.'); }
+  catch (error) { notice(error.message, true); }
+  finally { busy(false); }
+});
+$('run-button').addEventListener('click', async () => {
+  if (state.busy || !state.user) return;
+  busy(true); notice('Running analysis...');
+  try {
+    const result = await post('/api/analysis', { task: state.task,
+      document_ids: state.documents.filter((doc) => doc.status === 'ok').map((doc) => doc.document_id),
+      requirements: requirements() });
+    state.result = result; renderResult(); await refreshRuns();
+    notice('Analysis complete. Review the results below.');
+    $('analysis-result').scrollIntoView({ block: 'start' });
+  } catch (error) { notice(error.message, true); }
+  finally { busy(false); }
+});
+$('refresh-runs-button').addEventListener('click', async () => {
+  busy(true);
+  try { await refreshRuns(); notice('Saved results refreshed.'); }
+  catch (error) { notice(error.message, true); }
+  finally { busy(false); }
+});
+$('analysis-history').addEventListener('change', () => busy(state.busy));
+$('load-run-button').addEventListener('click', async () => {
+  busy(true);
+  try {
+    const result = await request(`/api/analysis/${$('analysis-history').value}`);
+    const sources = await Promise.all(result.document_ids.map((id) => request(`/api/documents/${id}`)));
+    state.documents = sources.map((item) => item.document); state.selected = 0; state.start = null; state.end = null;
+    state.result = result; render(); renderResult(); notice('Saved result opened.');
+    $('analysis-result').scrollIntoView({ block: 'start' });
+  } catch (error) { notice(error.message, true); }
+  finally { busy(false); }
+});
+for (const decision of ['approve', 'reject']) $(`${decision}-button`).addEventListener('click', async () => {
+  if (!state.result || state.busy) return;
+  const comment = $('review-comment').value.trim();
+  if (!comment) return notice('Enter a review note before approving or rejecting.', true);
+  busy(true);
+  try {
+    state.result = await post(`/api/analysis/${state.result.analysis_id}/review`, { decision, comment });
+    renderResult(); await refreshRuns(); notice(`Review recorded: ${state.result.review.status}.`);
+  } catch (error) { notice(error.message, true); }
+  finally { busy(false); }
+});
+$('trail-button').addEventListener('click', async () => {
+  if (!state.result) return;
+  if (!$('audit-trail').hidden) {
+    setAuditTrailOpen(false);
+    return;
+  }
+  const analysisId = state.result.analysis_id;
+  $('trail-button').disabled = true;
+  try {
+    const payload = await request(`/api/analysis/${analysisId}/audit`);
+    if (state.result?.analysis_id !== analysisId) return;
+    $('audit-trail').textContent = JSON.stringify(payload.events, null, 2);
+    setAuditTrailOpen(true);
+  } catch (error) { notice(error.message, true); }
+  finally { $('trail-button').disabled = false; }
+});
+$('result-download').addEventListener('click', () => { if (state.result) download(`${state.result.analysis_id}.json`, state.result); });
+async function restoreSession() {
+  try { setUser((await request('/api/session')).user); if (state.user) await refreshRuns(); }
+  catch (error) { notice(error.message, true); }
+}
 render();
-checkConnection();
+async function initialize() {
+  await checkConnection();
+  await restoreSession();
+  initializing = false;
+  busy(false);
+}
+initialize();

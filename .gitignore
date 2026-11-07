@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local demo audit records; never commit runtime data.
+.runtime/
