@@ -13,7 +13,7 @@ from urllib.request import HTTPSHandler, ProxyHandler, build_opener
 
 from backend.analysis import analyze_documents
 from backend.gemini import _NoRedirect
-from backend.groq import ENDPOINT, MAX_ERROR_RESPONSE_BYTES, GroqBriefGenerator
+from backend.groq import ENDPOINT, MAX_ERROR_RESPONSE_BYTES, GROQ_BRIEF_SCHEMA, GroqBriefGenerator
 from backend.server import create_server
 from document_reader import read_document_bytes
 
@@ -89,10 +89,11 @@ class GroqDiagnosticTests(unittest.TestCase):
         self.assertEqual(request.get_header("Content-length"), str(len(request.data)))
         body = json.loads(request.data)
         self.assertEqual(body["model"], "openai/gpt-oss-20b")
-        self.assertEqual(body["max_completion_tokens"], 4096)
+        self.assertEqual(body["max_completion_tokens"], 8192)
         self.assertEqual(body["reasoning_effort"], "low")
         self.assertFalse(body["include_reasoning"])
-        self.assertEqual(body["response_format"], {"type": "json_object"})
+        self.assertEqual(body["response_format"], {"type": "json_schema", "json_schema": {
+            "name": "icontinuum_brief", "strict": True, "schema": GROQ_BRIEF_SCHEMA}})
         self.assertIsInstance(factory.call_args.args[0], _NoRedirect)
         self.assertEqual(result["fallback_reason"], "provider_unavailable")
 

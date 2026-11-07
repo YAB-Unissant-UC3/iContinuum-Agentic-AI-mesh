@@ -166,8 +166,12 @@ These fields are returned by the integrated workflow. Deterministic citations
 are single-line extracts. AI citations may span up to 20 inclusive lines,
 with exact quotes joined using `\n`; original source text remains unchanged.
 
-Groq generation uses provider JSON-object mode with explicit local validation
-of the existing claims/citation structure before normalization. Schema-invalid
+Groq generation uses provider `json_schema` Structured Outputs with `strict: true`
+and explicit local validation of the existing claims/citation structure before
+normalization. Its independent schema preserves all required fields, types,
+section names, and closed objects. Only array count keywords are omitted from
+the Groq provider-facing schema; every existing local count/length/type/section
+check remains enforced. The shared Gemini schema is not modified. Schema-invalid
 content is rejected with labeled deterministic fallback; it is not repaired.
 Structurally valid drafts with incorrect citation IDs, ranges, or quotes are
 still flagged by the unchanged auditor. Gemini generation is unchanged.
@@ -248,7 +252,7 @@ Inspect these fields using Download result JSON or Show audit trail. Missing
 configuration and non-HTTP failures do not invent provider HTTP diagnostics.
 
 Local Groq parsing/validation failures retain `fallback_reason: invalid_response`
-and add only `{"provider":"groq","failure_stage":"structure_validation",
+and include `{"provider":"groq","failure_stage":"structure_validation",
 "failure_category":"invalid_section"}` (illustrative values). Stages and
 categories come from closed server-owned allowlists, documented in
 [AI providers](ai-providers.md#local-parsing-and-validation-diagnostics).
@@ -258,6 +262,16 @@ object appears in the result, saved run, and existing audit event/trail.
 incomplete JSON alone is `invalid_json`. Raw responses, unknown field names,
 invalid values, document text, exception messages, and credentials are excluded.
 Existing HTTP diagnostics and all validation/audit decisions are unchanged.
+
+For `structure_validation / invalid_type`, `provider_diagnostics` additionally
+includes `failure_field`, `expected_type`, and `actual_type` when the fixed
+schema location is known. For example: `"failure_field":"citation.line_end"`,
+`"expected_type":"integer"`, `"actual_type":"string"` (illustrative).
+Locations and type labels are closed server-owned allowlists; the expected
+type is derived from the location. No actual field value, unknown key, Python
+class name, or model text is recorded. Full lists are in the AI providers
+documentation linked above. The same fields appear in the downloaded result,
+saved run, and audit event/log. Invalid values remain rejected without coercion.
 
 Groq uses the same HTTP fallback behavior, with `provider: groq`, `http_status`,
 allowlisted `provider_error_code`/`provider_error_type` (unknown values null),

@@ -1,5 +1,6 @@
 """Bounded Groq Chat Completions adapter; credentials remain backend-only."""
 
+from copy import deepcopy
 import json
 import os
 import re
@@ -13,7 +14,21 @@ from .gemini import (BRIEF_SCHEMA, SYSTEM_INSTRUCTION, MAX_INPUT_CHARS, MAX_RESP
 
 DEFAULT_MODEL = "openai/gpt-oss-20b"
 ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
-MAX_COMPLETION_TOKENS = 4096
+MAX_COMPLETION_TOKENS = 8192
+
+
+def _build_groq_brief_schema():
+    """Copy the shared contract; keep array bounds in local validation only."""
+    schema = deepcopy(BRIEF_SCHEMA)
+    claims = schema["properties"]["claims"]
+    citations = claims["items"]["properties"]["citations"]
+    for array in (claims, citations):
+        del array["minItems"]
+        del array["maxItems"]
+    return schema
+
+
+GROQ_BRIEF_SCHEMA = _build_groq_brief_schema()
 GROQ_SYSTEM_INSTRUCTION = SYSTEM_INSTRUCTION + """
 Return exactly one JSON object, with only the root key "claims". No Markdown,
 code fences, commentary, or additional fields. The required envelope is:
@@ -27,6 +42,17 @@ Use JSON integers for line numbers, not strings or booleans. Line ranges are
 inclusive and preserve the original numbering; join exact source lines with
 JSON-escaped newline characters in multi-line quotes. Never repair or invent
 evidence, quote text, IDs, or line numbers.
+Prefer a single nonblank source line when it fully supports the statement.
+When multiple lines are necessary, prefer short contiguous spans, usually
+1-3 lines. This is a preference, not a hard three-line limit. Use separate
+citations for noncontiguous evidence rather than joining separated passages.
+Copy every cited line verbatim, including indentation, trailing spaces, and
+blank lines. The inclusive range must match exactly the quoted source lines:
+include every line from line_start through line_end, in order, joined by
+JSON-escaped newlines. A blank first or last cited line contributes a leading
+or trailing newline; do not trim it. Do not add a terminal newline beyond
+those required to join the cited lines. Check the range against the quote
+before returning it; do not include surrounding lines absent from the quote.
 The only section names are:
 "Overview", "Scope and approach", "Requirements and conflicts", and "Next steps".
 Use those exact names in that order where supported.
@@ -52,6 +78,11 @@ LOCAL_FAILURE_CATEGORIES = frozenset({"invalid_json", "duplicate_field", "missin
     "invalid_type", "invalid_section", "count_limit", "length_limit", "blank_text", "invalid_encoding",
     "response_size_limit", "truncated_response", "unexpected_finish_reason", "unexpected_tool_call",
     "normalization_failed", "validation_failed"})
+LOCAL_TYPE_FIELDS = {"root": "object", "claims": "array", "claim": "object",
+    "claim.section": "string", "claim.text": "string", "claim.citations": "array",
+    "citation": "object", "citation.document_id": "string", "citation.quote": "string",
+    "citation.line_start": "integer", "citation.line_end": "integer"}
+LOCAL_TYPE_NAMES = frozenset({"object", "array", "string", "integer", "number", "boolean", "null", "unknown"})
 
 
 def _send_request(request, timeout):
@@ -59,12 +90,29 @@ def _send_request(request, timeout):
     return build_opener(_NoRedirect()).open(request, timeout=timeout)
 
 
-def _local_failure(stage, category):
-    """Emit fixed codes only, never field names, values, or exception messages."""
+def _local_failure(stage, category, *, failure_field=None, actual_type=None):
+    """Emit fixed codes and known schema paths only, never model values/names."""
     stage = stage if isinstance(stage, str) and stage in LOCAL_FAILURE_STAGES else "local_processing"
     category = category if isinstance(category, str) and category in LOCAL_FAILURE_CATEGORIES else "validation_failed"
-    return ProviderUnavailable("invalid_response", {
-        "provider": "groq", "failure_stage": stage, "failure_category": category})
+    diagnostics = {"provider": "groq", "failure_stage": stage, "failure_category": category}
+    if (stage == "structure_validation" and category == "invalid_type"
+            and isinstance(failure_field, str) and failure_field in LOCAL_TYPE_FIELDS
+            and isinstance(actual_type, str) and actual_type in LOCAL_TYPE_NAMES):
+        diagnostics.update(failure_field=failure_field, expected_type=LOCAL_TYPE_FIELDS[failure_field],
+                           actual_type=actual_type)
+    return ProviderUnavailable("invalid_response", diagnostics)
+
+
+def _json_type(value):
+    """Return a closed type tag; do not stringify values or Python class names."""
+    if value is None:
+        return "null"
+    # bool is an int subclass in Python, but is never a citation line number.
+    for python_type, tag in ((bool, "boolean"), (str, "string"), (int, "integer"),
+                             (float, "number"), (list, "array"), (dict, "object")):
+        if isinstance(value, python_type):
+            return tag
+    return "unknown"
 
 
 def _unique_object(pairs):
@@ -99,17 +147,21 @@ def validate_brief_payload(payload):
     def reject(category):
         raise _local_failure("structure_validation", category)
 
-    def fields(value, expected):
+    def reject_type(field, value):
+        raise _local_failure("structure_validation", "invalid_type",
+                             failure_field=field, actual_type=_json_type(value))
+
+    def fields(value, expected, field):
         if not isinstance(value, dict):
-            reject("invalid_type")
+            reject_type(field, value)
         if expected - set(value):
             reject("missing_field")
         if set(value) - expected:
             reject("extra_field")
 
-    def check_text(value, limit, nonblank=False):
+    def check_text(value, limit, field, nonblank=False):
         if not isinstance(value, str):
-            reject("invalid_type")
+            reject_type(field, value)
         if len(value) > limit:
             reject("length_limit")
         if nonblank and not value.strip():
@@ -119,33 +171,35 @@ def validate_brief_payload(payload):
         except UnicodeError:
             reject("invalid_encoding")
 
-    fields(payload, {"claims"})
+    fields(payload, {"claims"}, "root")
     claims = payload["claims"]
     claim_schema = BRIEF_SCHEMA["properties"]["claims"]
     sections = claim_schema["items"]["properties"]["section"]["enum"]
     if not isinstance(claims, list):
-        reject("invalid_type")
+        reject_type("claims", claims)
     if not claim_schema["minItems"] <= len(claims) <= claim_schema["maxItems"]:
         reject("count_limit")
     for claim in claims:
-        fields(claim, {"section", "text", "citations"})
+        fields(claim, {"section", "text", "citations"}, "claim")
         if not isinstance(claim["section"], str):
-            reject("invalid_type")
+            reject_type("claim.section", claim["section"])
         if claim["section"] not in sections:
             reject("invalid_section")
-        check_text(claim["text"], 4000, nonblank=True)
+        check_text(claim["text"], 4000, "claim.text", nonblank=True)
         citations = claim["citations"]
         citation_schema = claim_schema["items"]["properties"]["citations"]
         if not isinstance(citations, list):
-            reject("invalid_type")
+            reject_type("claim.citations", citations)
         if not citation_schema["minItems"] <= len(citations) <= citation_schema["maxItems"]:
             reject("count_limit")
         for cite in citations:
-            fields(cite, {"document_id", "line_start", "line_end", "quote"})
-            check_text(cite["document_id"], 128)
-            check_text(cite["quote"], 10000)
-            if type(cite["line_start"]) is not int or type(cite["line_end"]) is not int:
-                reject("invalid_type")
+            fields(cite, {"document_id", "line_start", "line_end", "quote"}, "citation")
+            check_text(cite["document_id"], 128, "citation.document_id")
+            check_text(cite["quote"], 10000, "citation.quote")
+            if type(cite["line_start"]) is not int:
+                reject_type("citation.line_start", cite["line_start"])
+            if type(cite["line_end"]) is not int:
+                reject_type("citation.line_end", cite["line_end"])
     if sum(len(claim["text"].split()) for claim in claims) > 850:
         reject("length_limit")
 
@@ -269,7 +323,8 @@ class GroqBriefGenerator:
         body = {"model": self.model, "messages": [
                     {"role": "system", "content": GROQ_SYSTEM_INSTRUCTION},
                     {"role": "user", "content": data}],
-                "response_format": {"type": "json_object"},
+                "response_format": {"type": "json_schema", "json_schema": {
+                    "name": "icontinuum_brief", "strict": True, "schema": GROQ_BRIEF_SCHEMA}},
                 "reasoning_effort": "low", "include_reasoning": False,
                 "max_completion_tokens": MAX_COMPLETION_TOKENS, "stream": False}
         request = Request(ENDPOINT, data=json.dumps(body, ensure_ascii=True).encode("utf-8"),

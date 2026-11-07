@@ -112,6 +112,50 @@ async function run(task) {
   await assertIdentity(await evaluate('state.user.role'));
   return evaluate('state.result.analysis_id');
 }
+async function assertCitationLabelsAndLinks() {
+  const expected = await evaluate('state.result.contradictions[0].citations');
+  for (const width of [1440, 390, 320]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height: 1100, deviceScaleFactor: 1, mobile: width < 620 });
+    const layout = await evaluate(`(() => {
+      const group = Array.from(document.querySelectorAll('.result-citations')).find(node => node.children.length > 1);
+      const buttons = Array.from(group.querySelectorAll('button'));
+      const bounds = group.getBoundingClientRect();
+      const boxes = buttons.map(button => button.getBoundingClientRect());
+      return {
+        text: group.textContent, labels: buttons.map(button => button.textContent),
+        spaces: Array.from(group.childNodes).filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent),
+        gap: parseFloat(getComputedStyle(group).columnGap), wrap: getComputedStyle(group).flexWrap,
+        visible: buttons.every(button => button.checkVisibility()),
+        contained: boxes.every(box => box.left >= bounds.left - 1 && box.right <= bounds.right + 1),
+        separated: boxes.every((box, i) => !i || (Math.abs(box.top - boxes[i - 1].top) < 1
+          ? box.left > boxes[i - 1].right : box.top >= boxes[i - 1].bottom - 1))
+      };
+    })()`);
+    assert.equal(layout.text, layout.labels.join(' '));
+    assert.deepEqual(layout.spaces, Array(layout.labels.length - 1).fill(' '));
+    assert.ok(layout.gap > 0 && layout.visible && layout.contained && layout.separated, `Citation labels overlap or overflow at ${width}px`);
+    assert.equal(layout.wrap, 'wrap');
+    for (let index = 0; index < expected.length; index++) {
+      const keyboard = width === 320 && index === 1;
+      await evaluate(`(() => {
+        const group = Array.from(document.querySelectorAll('.result-citations')).find(node => node.children.length > 1);
+        const button = group.querySelectorAll('button')[${index}];
+        button.${keyboard ? 'focus' : 'click'}();
+      })()`);
+      if (keyboard) {
+        await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13,
+          text: '\r', unmodifiedText: '\r' });
+        await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+      }
+      const cite = expected[index];
+      await waitFor(`state.documents[state.selected]?.document_id === ${JSON.stringify(cite.document_id)}
+        && state.start === ${cite.line_start} && state.end === ${cite.line_end} && document.getElementById('sources').open`);
+      assert.equal(await evaluate(`document.querySelectorAll('.source-line.selected').length`), cite.line_end - cite.line_start + 1);
+    }
+    assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth'), `Page overflow at ${width}px`);
+  }
+  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
+}
 async function upload(files) {
   const { root } = await send('DOM.getDocument');
   const { nodeId } = await send('DOM.querySelector', { nodeId: root.nodeId, selector: '#file-input' });
@@ -186,6 +230,7 @@ try {
   const requirementsRun = await run('requirements');
   assert.deepEqual(await evaluate('state.result.contradictions[0].citations.map(c => c.line_start)'), [9, 8]);
   assert.equal(await evaluate('state.result.requirement_checks[1].status'), 'unclear');
+  await assertCitationLabelsAndLinks();
   await click('export-button'); assert.equal((await downloaded('icontinuum-documents')).documents.length, 3);
   await openDetails('sources');
   await click('json-tab');

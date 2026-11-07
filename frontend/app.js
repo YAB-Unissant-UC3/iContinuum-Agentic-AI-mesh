@@ -355,6 +355,8 @@ function citationButtons(citations) {
     const button = element('button', 'text-button result-citation', `${name}, ${range}`);
     button.title = `${cite.document_id}: ${cite.quote}`;
     button.addEventListener('click', () => showCitation(cite));
+    // Preserve word boundaries when labels are copied or read without CSS.
+    if (links.childNodes.length) links.append(document.createTextNode(' '));
     links.append(button);
   }
   return links;

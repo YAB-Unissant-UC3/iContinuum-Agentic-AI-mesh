@@ -43,13 +43,34 @@ The request explicitly sends `User-Agent: iContinuum-PoC/1.0` and
 on urllib's default client signature; they do not guarantee an edge filter will
 accept the request.
 
-The Groq adapter now requests `response_format: {"type":"json_object"}` instead
-of provider-side strict JSON Schema mode. It retains the existing citation
-contract, low reasoning effort, no returned reasoning, no tools, no streaming,
-and at most 4,096 completion tokens. Gemini code and request settings are
-unchanged. JSON-object mode is documented in Groq's
+The Groq adapter now requests `response_format.type: json_schema` with
+`json_schema.name: icontinuum_brief`, `strict: true`, and a Groq-specific schema.
+This replaces the earlier JSON Object Mode experiment. It retains the existing
+citation contract, low reasoning effort, no returned reasoning, no tools,
+no streaming, and at most 8,192 completion tokens. The model and generation
+settings are retained; Groq-only citation guidance is described below.
+Strict Structured Outputs is documented for GPT OSS 20B in Groq's
 [structured-output guide](https://console.groq.com/docs/structured-outputs) and
 [reasoning guide](https://console.groq.com/docs/reasoning).
+
+`GROQ_BRIEF_SCHEMA` is a deep copy of the shared `BRIEF_SCHEMA`. It preserves
+every required field, data type, section enum, and `additionalProperties: false`
+on all objects. Only array `minItems`/`maxItems` are omitted from the Groq
+provider-facing copy to limit schema-subset compatibility risks. The shared
+Gemini schema keeps those bounds, and the unchanged local Groq validator still
+enforces every count, length, type, and section rule. Provider schema adherence
+does not prove that a source supports a claim; citation auditing and Manager
+review still apply. Malformed responses are never repaired or trusted merely
+because strict mode was requested.
+
+The earlier token-budget experiment raised the cap from 4,096 to 8,192; this
+strict-mode experiment keeps that allowance. It does not establish why earlier
+HTTP `json_validate_failed` errors occurred or guarantee live success. The
+850-word narrative limit, 128 KiB response-byte limit, field-specific diagnostics,
+single-attempt deterministic fallback, and Gemini code/request are unchanged.
+A larger token allowance may increase latency or quota consumption. No live
+provider request was made for this experiment; actual account compatibility,
+latency, output quality, and failure rate remain unverified.
 
 The shared instruction asks for a coherent brief of about 400-550 words in four
 sections. Sparse evidence may yield fewer words; invented padding is forbidden.
@@ -61,6 +82,18 @@ each claim has exactly `section`, `text`, and `citations`; each citation has
 exactly `document_id`, `line_start`, `line_end`, and `quote`. The four section
 names are Overview, Scope and approach, Requirements and conflicts, and Next
 steps. Four to six paragraphs are a target, not permission to invent content.
+
+Groq citation guidance prefers one nonblank source line when sufficient, or a
+short contiguous span (usually 1-3 lines) when necessary. This is a preference,
+not a new hard range limit. Noncontiguous evidence should use separate citations.
+Quotes must preserve all source text, indentation, trailing spaces, and blank
+lines in the inclusive range, joined by escaped newlines. A blank first/last
+line contributes a leading/trailing newline; no extra terminal newline is added.
+For example, `meeting_notes.txt` line 4 is blank: a quote for lines 4-7 must
+include its initial newline. The three sentences alone match lines 5-7 instead.
+This guidance applies to future generation only; existing quotations and audit
+failures are never automatically repaired or removed. Prompt adherence and
+semantic support still require a separately approved live test and human review.
 
 Before normalization, a Groq-specific local validator rejects missing/extra
 fields, wrong types, invalid sections, and count/length violations. Bounds are
@@ -163,7 +196,7 @@ of the earlier strict-schema failure or guarantee live generation success.
 ## Local parsing and validation diagnostics
 
 Local Groq failures retain `fallback_reason: invalid_response` and now include
-exactly three safe diagnostic fields. For example (illustrative, not a finding
+three base diagnostic fields. For example (illustrative, not a finding
 about any previous run):
 
 ```json
@@ -222,9 +255,50 @@ values, exception messages, response fragments, generated/document text, or
 credentials are included. HTTP failures retain their existing richer safe
 diagnostics and are not overwritten by these local codes.
 
-This update changes diagnostics only: provider/model choice, prompt, request
-JSON, token/reasoning settings, validation rules, citation auditing, RBAC,
-Manager review, deterministic fallback, and Gemini code remain unchanged.
+For `structure_validation / invalid_type`, three additional fields identify
+the first type mismatch without recording its value. For example (illustrative):
+
+```json
+{
+  "provider": "groq",
+  "failure_stage": "structure_validation",
+  "failure_category": "invalid_type",
+  "failure_field": "citation.line_start",
+  "expected_type": "integer",
+  "actual_type": "string"
+}
+```
+
+`failure_field` is a fixed server-owned schema location, never an unknown
+model-provided field name. Its expected type comes from this closed mapping:
+
+| Schema location | Expected type |
+| --- | --- |
+| `root`, `claim`, `citation` | `object` |
+| `claims`, `claim.citations` | `array` |
+| `claim.section`, `claim.text`, `citation.document_id`, `citation.quote` | `string` |
+| `citation.line_start`, `citation.line_end` | `integer` |
+
+`actual_type` is one of `object`, `array`, `string`, `integer`, `number`,
+`boolean`, `null`, or `unknown`. `number` denotes a JSON value decoded as a
+Python float, including `1.0`; it remains invalid for citation line numbers.
+Booleans are tagged separately from integers. `unknown` is a safe tag for an
+internal non-JSON Python object; no Python class name or representation is used.
+Unknown schema locations/type tags are omitted rather than copied into output.
+Other failure stages/categories keep their existing diagnostics.
+
+The three additional fields propagate through downloaded result JSON, saved
+runs, audit events/trails, and the local audit log. They do not include array
+indices, model values, nested keys, text, or credentials. Validation acceptance,
+failure precedence, and citation checks are unchanged; no types are coerced.
+Existing saved runs are not retroactively enriched. Restart the backend before
+an explicitly approved controlled live test; this diagnostic update alone does
+not guarantee that Groq will generate a usable brief.
+
+The diagnostic additions themselves do not change provider/model choice,
+prompt, validation rules, citation auditing, RBAC, Manager review, deterministic
+fallback, or Gemini code. The strict-mode experiment described above changes
+only Groq's provider-facing response format/schema.
 
 The timeout is per socket operation, not a strict total duration. Provider quota,
 access, latency, complete schema compatibility, and real output quality remain
@@ -281,6 +355,38 @@ Stop with Ctrl+C, then set `$env:ICONTINUUM_AI_MODE = 'deterministic'`. A future
 backend restart is needed to apply the offline mode.
 
 ## Offline verification
+
+Citation-guidance/label-spacing verification: all **161 Python tests passed**,
+including **60 Groq tests**. Four new regressions cover C004's omitted leading
+blank line, exact 4-7 and 5-7 spans, single/separate citations, retained support
+for ranges longer than three lines, exact whitespace, and Manager approval
+blocking without repairing stored output. Both JavaScript syntax checks and
+the Chrome workflows for mocked Groq, mocked Gemini, simulated provider outage,
+and deterministic mode passed. Citation checks cover text separation, wrapping,
+non-overlap, correct source navigation, and mobile keyboard activation. No live
+provider requests were made; prompt adherence still needs a controlled live
+test, and semantic support still needs human review.
+
+Strict Structured Outputs verification: all **157 Python tests passed**,
+including **56 Groq tests**. Three new regression tests verify the independent
+provider schema, retained required/type/enum/closed-object rules, omitted
+provider-only array bounds, unchanged local validation, and unchanged Gemini
+schema/request. Existing mocked one-page AI briefs, invalid outputs, provider
+errors, safe diagnostics, citation auditing, RBAC, Manager review, and fallback
+tests also passed. No live provider requests were made; restart the backend
+before a separately approved controlled live test.
+
+The 8,192-token budget experiment passed all **154 Python tests**, including
+all **53 Groq tests**. Existing citation, audit, RBAC, field-diagnostic, and
+fallback tests passed; live provider behavior remains untested for this change.
+
+Field-specific type diagnostics verification: **154 Python tests passed**,
+including all **53 Groq tests**. Four new regression tests cover type mismatches
+at all 11 schema locations, closed diagnostic allowlists, nested-value/key
+redaction, unchanged failure order, and rejection without normalization or
+coercion. The HTTP persistence test also verifies the additional fields in the
+result JSON, saved run, audit event/trail, and audit log. No live provider
+requests were made; generation settings and validation rules are unchanged.
 
 Groq local-validation diagnostics verification: **149 Python tests passed**
 and both JavaScript syntax checks passed. Nine new tests cover fixed failure

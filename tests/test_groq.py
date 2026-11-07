@@ -12,7 +12,8 @@ from urllib.error import HTTPError, URLError
 
 from backend.analysis import analyze_documents
 from backend.gemini import SYSTEM_INSTRUCTION, GeminiBriefGenerator, MAX_RESPONSE_BYTES, _NoRedirect
-from backend.groq import DEFAULT_MODEL, ENDPOINT, MAX_ERROR_RESPONSE_BYTES, GROQ_SYSTEM_INSTRUCTION, GroqBriefGenerator
+from backend.groq import (DEFAULT_MODEL, ENDPOINT, MAX_ERROR_RESPONSE_BYTES, GROQ_BRIEF_SCHEMA,
+                          GROQ_SYSTEM_INSTRUCTION, GroqBriefGenerator)
 from backend.providers import brief_generator_from_environment
 from backend.server import create_server
 from document_reader import read_document_bytes
@@ -72,11 +73,12 @@ class GroqAdapterTests(unittest.TestCase):
         evidence = json.loads(body["messages"][1]["content"])
         self.assertEqual(evidence["source_evidence"], [{"document_id": self.document["document_id"], "lines": self.document["lines"]}])
         self.assertTrue(evidence["known_conflicts"])
-        self.assertEqual(body["response_format"], {"type": "json_object"})
+        self.assertEqual(body["response_format"], {"type": "json_schema", "json_schema": {
+            "name": "icontinuum_brief", "strict": True, "schema": GROQ_BRIEF_SCHEMA}})
         self.assertEqual(body["reasoning_effort"], "low")
         self.assertFalse(body["include_reasoning"])
         self.assertFalse(body["stream"])
-        self.assertEqual(body["max_completion_tokens"], 4096)
+        self.assertEqual(body["max_completion_tokens"], 8192)
         self.assertEqual(self.transport.call_args.kwargs["timeout"], 60)
         self.assertNotIn("reasoning_format", body)
         self.assertNotIn("tools", body)
@@ -368,6 +370,35 @@ class GroqHTTPTests(unittest.TestCase):
         route = "/api/analysis/" + result["analysis_id"] + "/review"
         self.assertEqual(self.call("manager", "POST", route, {"decision": "approve", "comment": "Checked."})[0], 409)
         self.assertEqual(self.call("manager", "POST", route, {"decision": "reject", "comment": "Unsupported number."})[0], 200)
+
+    def test_c004_quote_mismatch_blocks_approval_and_saved_quote_is_unchanged(self):
+        def missing_blank(request, timeout):
+            documents = json.loads(json.loads(request.data)["messages"][1]["content"])["source_evidence"]
+            document = next(doc for doc in documents if doc["lines"][0]["text"].endswith("Meeting Notes"))
+            self.assertEqual(document["lines"][3]["text"], "")
+            claims = [claim(document, document["lines"][n - 1]["text"], n, n) for n in (5, 6, 7)]
+            claims.append(claim(document, "The applications share a backend, with document reading and source checks.", 4, 7))
+            claims[3]["citations"][0]["quote"] = "\n".join(line["text"] for line in document["lines"][4:7])
+            return groq_response({"claims": claims})
+
+        self.transport.side_effect = missing_blank
+        result = self.run_brief()
+        original_citation = dict(result["claims"][3]["citations"][0])
+        self.assertEqual(result["audit"]["status"], "flagged")
+        self.assertTrue(any(flag["target"] == "C004" and flag["code"] == "quote_mismatch" for flag in result["audit"]["flags"]))
+        route = "/api/analysis/" + result["analysis_id"]
+        approval = {"decision": "approve", "comment": "Checked the quotation."}
+        self.assertEqual(self.call("analyst", "POST", route + "/review", approval)[0], 403)
+        self.assertEqual(self.call("manager", "POST", route + "/review", approval)[0], 409)
+        _, saved, _ = self.call("manager", "GET", route)
+        self.assertEqual(saved["claims"][3]["citations"][0], original_citation)
+        self.assertEqual(saved["review"]["status"], "pending")
+        status, rejected, _ = self.call("manager", "POST", route + "/review", {
+            "decision": "reject", "comment": "Quotation omits the leading blank line."})
+        self.assertEqual(status, 200)
+        self.assertEqual(rejected["review"]["status"], "rejected")
+        self.assertEqual(rejected["audit"]["status"], "flagged")
+        self.assertEqual(rejected["claims"][3]["citations"][0], original_citation)
 
     def test_provider_failure_is_labeled_and_secret_free_in_http_results_and_log(self):
         self.transport.side_effect = HTTPError(ENDPOINT, 429, FAKE_KEY, {"Authorization": FAKE_KEY},

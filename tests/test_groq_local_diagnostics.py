@@ -14,7 +14,7 @@ from urllib.error import HTTPError
 from backend.analysis import analyze_documents
 from backend.gemini import MAX_RESPONSE_BYTES, ProviderUnavailable
 from backend.groq import (ENDPOINT, LOCAL_FAILURE_STAGES, LOCAL_FAILURE_CATEGORIES,
-                          GroqBriefGenerator, _local_failure)
+                          GroqBriefGenerator, _local_failure, _json_type)
 from backend.server import create_server
 from document_reader import read_document_bytes
 from test_gemini import MockResponse, claim
@@ -31,13 +31,15 @@ class GroqLocalDiagnosticTests(unittest.TestCase):
         self.transport = transport_patch.start()
         self.addCleanup(transport_patch.stop)
 
-    def assert_failure(self, response, stage, category):
+    def assert_failure(self, response, stage, category, type_details=None):
         self.transport.return_value = response
         result = analyze_documents(self.request, self.provider)
         self.assertEqual(result["fallback_reason"], "invalid_response")
         self.assertEqual(result["mode"], "deterministic_demo")
         diag = result["provider_diagnostics"]
-        self.assertEqual(diag, {"provider": "groq", "failure_stage": stage, "failure_category": category})
+        expected = {"provider": "groq", "failure_stage": stage, "failure_category": category}
+        expected.update(type_details or {})
+        self.assertEqual(diag, expected)
         self.assertEqual(result["audit_event"]["provider_diagnostics"], diag)
         self.assertIn(diag["failure_stage"], LOCAL_FAILURE_STAGES)
         self.assertIn(diag["failure_category"], LOCAL_FAILURE_CATEGORIES)
@@ -63,7 +65,91 @@ class GroqLocalDiagnosticTests(unittest.TestCase):
             with self.subTest(category=category):
                 payload = copy.deepcopy(self.payload)
                 mutate(payload)
-                self.assert_failure(groq_response(payload), "structure_validation", category)
+                details = None
+                if category == "invalid_type":
+                    details = ({"failure_field": "claim.text", "expected_type": "string", "actual_type": "integer"}
+                               if payload["claims"][0]["text"] == 42 else
+                               {"failure_field": "citation.line_start", "expected_type": "integer", "actual_type": "boolean"})
+                self.assert_failure(groq_response(payload), "structure_validation", category, details)
+
+    def test_each_structural_type_mismatch_reports_a_fixed_field_and_types(self):
+        fields = [("root", (), "object"), ("claims", ("claims",), "array"),
+                  ("claim", ("claims", 0), "object"),
+                  ("claim.section", ("claims", 0, "section"), "string"),
+                  ("claim.text", ("claims", 0, "text"), "string"),
+                  ("claim.citations", ("claims", 0, "citations"), "array"),
+                  ("citation", ("claims", 0, "citations", 0), "object"),
+                  ("citation.document_id", ("claims", 0, "citations", 0, "document_id"), "string"),
+                  ("citation.quote", ("claims", 0, "citations", 0, "quote"), "string"),
+                  ("citation.line_start", ("claims", 0, "citations", 0, "line_start"), "integer"),
+                  ("citation.line_end", ("claims", 0, "citations", 0, "line_end"), "integer")]
+        values = [(None, "null"), ([], "array"), ({}, "object"), (PRIVATE, "string"),
+                  (42, "integer"), (1.0, "number"), (True, "boolean"), (False, "boolean")]
+        for field, path, expected_type in fields:
+            for value, actual_type in values:
+                if expected_type == actual_type:
+                    continue
+                with self.subTest(field=field, actual_type=actual_type):
+                    payload = copy.deepcopy(self.payload)
+                    if not path:
+                        payload = copy.deepcopy(value)
+                    else:
+                        target = payload
+                        for part in path[:-1]:
+                            target = target[part]
+                        target[path[-1]] = copy.deepcopy(value)
+                    original = copy.deepcopy(payload)
+                    with patch("backend.groq.normalize_brief") as normalize:
+                        self.assert_failure(groq_response(payload), "structure_validation", "invalid_type", {
+                            "failure_field": field, "expected_type": expected_type, "actual_type": actual_type})
+                        normalize.assert_not_called()
+                    self.assertEqual(payload, original)  # No coercion/repair.
+
+    def test_type_diagnostic_fields_and_tags_are_closed_allowlists(self):
+        basic = {"provider": "groq", "failure_stage": "structure_validation", "failure_category": "invalid_type"}
+        for unknown in (PRIVATE, FAKE_KEY, "claims[" + PRIVATE + "]", None, []):
+            with self.subTest(unknown_type=type(unknown).__name__):
+                self.assertEqual(_local_failure("structure_validation", "invalid_type",
+                    failure_field=unknown, actual_type="string").diagnostics, basic)
+                self.assertEqual(_local_failure("structure_validation", "invalid_type",
+                    failure_field="citation.line_start", actual_type=unknown).diagnostics, basic)
+        for stage, category in (("content_json", "invalid_type"), ("structure_validation", "missing_field")):
+            self.assertEqual(_local_failure(stage, category, failure_field="citation.quote", actual_type="array").diagnostics,
+                {"provider": "groq", "failure_stage": stage, "failure_category": category})
+        # Never derive a tag from a Python class name or object representation.
+        class PrivateValue:
+            def __str__(self):
+                raise AssertionError("Diagnostic code must not stringify values")
+
+            __repr__ = __str__
+
+        self.assertEqual(_json_type(PrivateValue()), "unknown")
+
+    def test_nested_invalid_type_values_never_leak_credentials_or_model_text(self):
+        for field, value, tag in (("quote", [{FAKE_KEY: PRIVATE}], "array"),
+                                  ("line_start", {PRIVATE: FAKE_KEY}, "object")):
+            with self.subTest(field=field):
+                payload = copy.deepcopy(self.payload)
+                payload["claims"][0]["citations"][0][field] = value
+                response = groq_response(payload)
+                response.data = response.data.replace(FAKE_KEY.encode(),
+                    "".join("\\u{:04x}".format(ord(char)) for char in FAKE_KEY).encode())
+                self.assert_failure(response, "structure_validation", "invalid_type", {
+                    "failure_field": "citation." + field,
+                    "expected_type": "string" if field == "quote" else "integer", "actual_type": tag})
+
+    def test_type_diagnostics_keep_existing_first_failure_order(self):
+        payload = copy.deepcopy(self.payload)
+        citation = payload["claims"][0]["citations"][0]
+        citation.update(quote=[], line_start="1", line_end=False)
+        self.assert_failure(groq_response(payload), "structure_validation", "invalid_type", {
+            "failure_field": "citation.quote", "expected_type": "string", "actual_type": "array"})
+        citation["quote"] = self.payload["claims"][0]["citations"][0]["quote"]
+        self.assert_failure(groq_response(payload), "structure_validation", "invalid_type", {
+            "failure_field": "citation.line_start", "expected_type": "integer", "actual_type": "string"})
+        citation["line_start"] = 1
+        self.assert_failure(groq_response(payload), "structure_validation", "invalid_type", {
+            "failure_field": "citation.line_end", "expected_type": "integer", "actual_type": "boolean"})
 
     def test_response_json_and_content_json_have_different_stages(self):
         self.assert_failure(MockResponse(b"not JSON"), "response_json", "invalid_json")
@@ -163,14 +249,19 @@ class GroqLocalDiagnosticTests(unittest.TestCase):
                 _, _, cookie = call("POST", "/api/login", {"username": "analyst", "password": "AnalystDemo!2026"})
                 cookie = cookie.split(";", 1)[0]
                 _, docs, _ = call("GET", "/api/demo", cookie=cookie)
-                cases = [(groq_response({"claims": []}), "structure_validation", "count_limit"),
-                         (groq_response(self.payload, finish="length"), "completion", "truncated_response")]
-                for response, stage, category in cases:
+                wrong_line = copy.deepcopy(self.payload)
+                wrong_line["claims"][0]["citations"][0]["line_end"] = "1"
+                cases = [(groq_response({"claims": []}), "structure_validation", "count_limit", {}),
+                         (groq_response(self.payload, finish="length"), "completion", "truncated_response", {}),
+                         (groq_response(wrong_line), "structure_validation", "invalid_type", {
+                             "failure_field": "citation.line_end", "expected_type": "integer", "actual_type": "string"})]
+                for response, stage, category, type_details in cases:
                     self.transport.return_value = response
                     status, result, _ = call("POST", "/api/analysis", {"task": "brief",
                         "document_ids": [docs["documents"][0]["document_id"]]}, cookie)
                     self.assertEqual(status, 200)
                     expected = {"provider": "groq", "failure_stage": stage, "failure_category": category}
+                    expected.update(type_details)
                     self.assertEqual(result["provider_diagnostics"], expected)
                     self.assertEqual(result["fallback_reason"], "invalid_response")
                     self.assertEqual(result["mode"], "deterministic_demo")
@@ -183,7 +274,9 @@ class GroqLocalDiagnosticTests(unittest.TestCase):
                 log = Path(folder, "audit.jsonl").read_text(encoding="utf-8")
                 for private in (FAKE_KEY, PRIVATE, docs["documents"][0]["text"].strip()):
                     self.assertNotIn(private, log)
-                self.assertEqual(len(log.splitlines()), 2)
+                records = [json.loads(line) for line in log.splitlines()]
+                self.assertEqual(len(records), 3)
+                self.assertEqual(records[-1]["provider_diagnostics"], expected)
             finally:
                 server.shutdown()
                 server.server_close()
