@@ -14,7 +14,7 @@ from urllib.error import HTTPError
 from backend.analysis import analyze_documents
 from backend.gemini import MAX_RESPONSE_BYTES, ProviderUnavailable
 from backend.groq import (ENDPOINT, LOCAL_FAILURE_STAGES, LOCAL_FAILURE_CATEGORIES,
-                          GroqBriefGenerator, _local_failure, _json_type)
+                          GroqBriefGenerator, _local_failure, _json_type, validate_brief_payload)
 from backend.server import create_server
 from document_reader import read_document_bytes
 from test_gemini import MockResponse, claim
@@ -70,7 +70,63 @@ class GroqLocalDiagnosticTests(unittest.TestCase):
                     details = ({"failure_field": "claim.text", "expected_type": "string", "actual_type": "integer"}
                                if payload["claims"][0]["text"] == 42 else
                                {"failure_field": "citation.line_start", "expected_type": "integer", "actual_type": "boolean"})
+                elif category == "count_limit":
+                    details = {"failure_field": "claim.citations" if payload["claims"] else "claims",
+                               "actual_count": 0, "minimum_count": 1,
+                               "maximum_count": 8 if payload["claims"] else 24}
                 self.assert_failure(groq_response(payload), "structure_validation", category, details)
+
+    def assert_count_failure(self, field, count):
+        payload = copy.deepcopy(self.payload)
+        payload["claims"][0]["text"] = PRIVATE
+        if field == "claims":
+            payload["claims"] *= count
+        else:
+            payload["claims"][0]["citations"] *= count
+        original = copy.deepcopy(payload)
+        with patch("backend.groq.normalize_brief") as normalize:
+            self.assert_failure(groq_response(payload), "structure_validation", "count_limit", {
+                "failure_field": field, "actual_count": count, "minimum_count": 1,
+                "maximum_count": 24 if field == "claims" else 8})
+            normalize.assert_not_called()
+        self.assertEqual(payload, original)
+
+    def test_too_few_claims_report_exact_count_and_limits(self):
+        self.assert_count_failure("claims", 0)
+
+    def test_too_many_claims_report_exact_count_and_limits(self):
+        self.assert_count_failure("claims", 25)
+
+    def test_too_few_citations_report_exact_count_and_limits(self):
+        self.assert_count_failure("claim.citations", 0)
+
+    def test_too_many_citations_report_exact_count_and_limits(self):
+        self.assert_count_failure("claim.citations", 9)
+
+    def test_existing_count_boundaries_remain_valid_without_repair(self):
+        for claims in (1, 24):
+            for citations in (1, 8):
+                with self.subTest(claims=claims, citations=citations):
+                    payload = copy.deepcopy(self.payload)
+                    payload["claims"][0]["citations"] *= citations
+                    payload["claims"] *= claims
+                    original = copy.deepcopy(payload)
+                    validate_brief_payload(payload)
+                    self.assertEqual(payload, original)
+
+    def test_count_diagnostics_allow_only_known_fields_and_integer_counts(self):
+        basic = {"provider": "groq", "failure_stage": "structure_validation", "failure_category": "count_limit"}
+        for field in (PRIVATE, FAKE_KEY, "claims[" + PRIVATE + "]", "citation.quote", None, []):
+            with self.subTest(field_type=type(field).__name__):
+                self.assertEqual(_local_failure("structure_validation", "count_limit",
+                    failure_field=field, actual_count=0).diagnostics, basic)
+        for count in (PRIVATE, FAKE_KEY, None, True, False, -1, 0.0, [], {PRIVATE: FAKE_KEY}):
+            with self.subTest(count_type=type(count).__name__):
+                self.assertEqual(_local_failure("structure_validation", "count_limit",
+                    failure_field="claims", actual_count=count).diagnostics, basic)
+        for stage, category in (("response_envelope", "count_limit"), ("structure_validation", "missing_field")):
+            self.assertEqual(_local_failure(stage, category, failure_field="claims", actual_count=0).diagnostics,
+                {"provider": "groq", "failure_stage": stage, "failure_category": category})
 
     def test_each_structural_type_mismatch_reports_a_fixed_field_and_types(self):
         fields = [("root", (), "object"), ("claims", ("claims",), "array"),
@@ -251,7 +307,18 @@ class GroqLocalDiagnosticTests(unittest.TestCase):
                 _, docs, _ = call("GET", "/api/demo", cookie=cookie)
                 wrong_line = copy.deepcopy(self.payload)
                 wrong_line["claims"][0]["citations"][0]["line_end"] = "1"
-                cases = [(groq_response({"claims": []}), "structure_validation", "count_limit", {}),
+                count_cases = []
+                for field, count in (("claims", 0), ("claims", 25), ("claim.citations", 0), ("claim.citations", 9)):
+                    payload = copy.deepcopy(self.payload)
+                    payload["claims"][0]["text"] = PRIVATE
+                    if field == "claims":
+                        payload["claims"] *= count
+                    else:
+                        payload["claims"][0]["citations"] *= count
+                    count_cases.append((groq_response(payload), "structure_validation", "count_limit", {
+                        "failure_field": field, "actual_count": count, "minimum_count": 1,
+                        "maximum_count": 24 if field == "claims" else 8}))
+                cases = count_cases + [
                          (groq_response(self.payload, finish="length"), "completion", "truncated_response", {}),
                          (groq_response(wrong_line), "structure_validation", "invalid_type", {
                              "failure_field": "citation.line_end", "expected_type": "integer", "actual_type": "string"})]
@@ -271,11 +338,14 @@ class GroqLocalDiagnosticTests(unittest.TestCase):
                     _, trail, _ = call("GET", route + "/audit", cookie=cookie)
                     self.assertEqual(saved["provider_diagnostics"], expected)
                     self.assertEqual(trail["events"][0]["provider_diagnostics"], expected)
+                    self.assertEqual(result["audit_event"]["provider_diagnostics"], expected)
+                    records = [json.loads(line) for line in Path(folder, "audit.jsonl").read_text(encoding="utf-8").splitlines()]
+                    self.assertEqual(records[-1]["provider_diagnostics"], expected)
                 log = Path(folder, "audit.jsonl").read_text(encoding="utf-8")
                 for private in (FAKE_KEY, PRIVATE, docs["documents"][0]["text"].strip()):
                     self.assertNotIn(private, log)
                 records = [json.loads(line) for line in log.splitlines()]
-                self.assertEqual(len(records), 3)
+                self.assertEqual(len(records), len(cases))
                 self.assertEqual(records[-1]["provider_diagnostics"], expected)
             finally:
                 server.shutdown()

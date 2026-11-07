@@ -79,12 +79,12 @@
         </div>
         <div class="dropzone" id="dropzone">
           <div class="dropzone-copy">
-            <strong>Drop .txt files here</strong>
-            <p>UTF-8 text. Up to 12 files, 256 KiB and 10,000 lines each.</p>
+            <strong>Drop TXT or PDF files here</strong>
+            <p>UTF-8 TXT or text PDFs. Up to 12 files, 256 KiB and 10,000 lines each. No OCR.</p>
           </div>
           <div class="upload-actions"><button class="button primary" id="browse-button">Choose files</button>
           <button class="button secondary" id="demo-button">Load sample documents</button></div>
-          <input id="file-input" type="file" accept=".txt,text/plain" multiple hidden>
+          <input id="file-input" type="file" accept=".txt,.pdf,text/plain,application/pdf" multiple hidden>
         </div>
         <label class="access-field" id="upload-access-label" hidden>Access for new uploads
           <select id="upload-access"><option value="public">Standard: uploader and Managers</option><option value="restricted">Restricted: Manager only</option></select>

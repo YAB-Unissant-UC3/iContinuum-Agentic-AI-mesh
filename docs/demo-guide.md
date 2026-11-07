@@ -9,15 +9,17 @@ approval. Requirements Checker behavior is unchanged.
 
 ## Run the application
 
-From the repository root, with Python 3.9 or newer installed:
+From the repository root, with Python 3.10 or newer installed:
 
 ```powershell
 python --version
+python -m pip install -r requirements.txt
 python -m backend
 ```
 
 Open **http://127.0.0.1:8000**. Keep the terminal running; Ctrl+C stops it.
-No `pip install`, npm installation, database, API key, or model is required.
+PDF support requires `pypdf` from `requirements.txt`. No npm installation,
+database, API key, or model is required for demo mode.
 If your Python command is `py`, substitute `py` for `python`.
 
 On the development computer, an ignored portable runtime is also prepared at
@@ -178,5 +180,7 @@ documents and 100 analyses per process; restart to clear the in-memory records.
   `needs_review` status can be approved with a note; its audit status stays unchanged.
 - Accounts, HTTP sessions, and the editable JSONL file are for a localhost demo.
   No production identity system, HTTPS hosting, tamper-proof ledger, database,
-  or PDF/Word/OCR is provided. The optional Gemini integration sends only selected,
+  or Word/OCR is provided. Text PDFs are supported; see [PDF support](pdf-support.md)
+  for page references, story-document permissions, and extraction limits.
+  The optional AI integration sends only selected,
   authorized synthetic evidence. Synthetic data only.

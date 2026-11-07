@@ -113,7 +113,7 @@ class FullWorkflowTests(unittest.TestCase):
                 self.assertEqual(error["error"]["code"], "access_denied")
                 self.assertNotIn("CEDAR-DEMO-742", repr(error))
                 self.assertNotIn("4200", repr(error))
-        self.assertEqual(len(self.demo()), 3)
+        self.assertEqual(len(self.demo()), 7)
         status, listing, _ = self.call("analyst", "GET", "/api/documents?role=manager")
         self.assertEqual(status, 200)
         self.assertNotIn(identifier, repr(listing))

@@ -1,4 +1,4 @@
-"""Read UTF-8 text files without summarizing or changing their contents."""
+"""Read UTF-8 TXT or text PDFs without summarizing their contents."""
 
 import hashlib
 from pathlib import Path
@@ -25,16 +25,21 @@ def read_document(file_path: Union[str, Path]) -> dict:
     """Read a local file. IDs identify exact bytes, independent of location."""
     path = Path(file_path)
     document = _empty_document(path)
-    if path.suffix.lower() != ".txt":
+    if path.suffix.lower() not in {".txt", ".pdf"}:
         document["error"] = {
             "code": "unsupported_file_type",
-            "message": "Only .txt files are supported.",
+            "message": "Only .txt and .pdf files are supported.",
         }
         return document
 
     try:
         # Reading bytes avoids automatically changing Windows line endings.
-        raw_bytes = path.read_bytes()
+        if path.suffix.lower() == ".pdf":
+            from .pdf import MAX_PDF_BYTES
+            with path.open("rb") as stream:
+                raw_bytes = stream.read(MAX_PDF_BYTES + 1)
+        else:
+            raw_bytes = path.read_bytes()
     except OSError as exc:
         if isinstance(exc, FileNotFoundError):
             code = "file_not_found"
@@ -45,7 +50,7 @@ def read_document(file_path: Union[str, Path]) -> dict:
         document["error"] = {"code": code, "message": str(exc)}
         return document
 
-    return _decode_document(document, raw_bytes)
+    return _extract_document(document, raw_bytes)
 
 
 def read_document_bytes(file_name: str, raw_bytes: bytes) -> dict:
@@ -54,12 +59,19 @@ def read_document_bytes(file_name: str, raw_bytes: bytes) -> dict:
     No upload is saved to disk. The source path is the supplied file name.
     """
     document = _empty_document(Path(file_name))
-    if Path(file_name).suffix.lower() != ".txt":
+    if Path(file_name).suffix.lower() not in {".txt", ".pdf"}:
         document["error"] = {
             "code": "unsupported_file_type",
-            "message": "Only .txt files are supported.",
+            "message": "Only .txt and .pdf files are supported.",
         }
         return document
+    return _extract_document(document, raw_bytes)
+
+
+def _extract_document(document, raw_bytes):
+    if Path(document["file_name"]).suffix.lower() == ".pdf":
+        from .pdf import extract_pdf
+        return extract_pdf(document, raw_bytes)
     return _decode_document(document, raw_bytes)
 
 

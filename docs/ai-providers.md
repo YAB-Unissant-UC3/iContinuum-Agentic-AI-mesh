@@ -3,7 +3,8 @@
 The shared Reader -> Analysis -> Audit workflow supports Groq GPT OSS 20B,
 optional Gemini, and deterministic extracts. The Requirements Checker remains
 deterministic; its Phase 2 evidence-matrix plan is not implemented here.
-No third-party Python packages are needed. No live provider request was made
+The AI adapters use the Python standard library; PDF extraction adds `pypdf`
+(install `requirements.txt`). No live provider request was made
 during this implementation; all provider verification used mocks.
 
 ## Selection and configuration

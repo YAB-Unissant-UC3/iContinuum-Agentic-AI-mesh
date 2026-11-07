@@ -36,7 +36,7 @@ function busy(value) {
   const readable = state.documents.filter((doc) => doc.status === 'ok').length;
   $('analysis-hint').textContent = value ? 'Please wait...'
     : readable ? `Uses all ${readable} readable document${readable === 1 ? '' : 's'}.`
-      : state.documents.length ? 'No readable text. Add a non-empty .txt file.' : 'Add documents above to enable analysis.';
+      : state.documents.length ? 'No readable text. Add a non-empty TXT or text PDF file.' : 'Add documents above to enable analysis.';
   $('load-run-button').disabled = value || !state.user || !$('analysis-history').value;
   $('analysis-history').disabled = value || !state.user || $('analysis-history').options.length < 2;
   $('approve-button').disabled = value || !canApprove(state.result);
@@ -71,16 +71,32 @@ function addDocuments(incoming) {
 function citation() {
   const source = state.documents[state.selected];
   if (!source?.document_id || state.start === null) return null;
-  return { document_id: source.document_id, line_start: Math.min(state.start, state.end), line_end: Math.max(state.start, state.end) };
+  const reference = { document_id: source.document_id, line_start: Math.min(state.start, state.end), line_end: Math.max(state.start, state.end) };
+  if (source.format === 'pdf') {
+    reference.page_references = [];
+    for (const line of source.lines.slice(reference.line_start - 1, reference.line_end)) {
+      const last = reference.page_references.at(-1);
+      if (!last || last.page_number !== line.page_number) reference.page_references.push({ page_number: line.page_number, line_start: line.page_line_number, line_end: line.page_line_number });
+      else last.line_end = line.page_line_number;
+    }
+  }
+  return reference;
+}
+
+function citationLocation(cite) {
+  const range = (start, end) => start === end ? `line ${start}` : `lines ${start}–${end}`;
+  return cite.page_references?.length
+    ? cite.page_references.map((ref) => `page ${ref.page_number}, ${range(ref.line_start, ref.line_end)}`).join('; ')
+    : range(cite.line_start, cite.line_end);
 }
 
 function renderSelection() {
   const reference = citation();
   $('copy-button').disabled = !reference;
   $('citation-hint').textContent = reference
-    ? `Line${reference.line_start === reference.line_end ? '' : 's'} ${reference.line_start}${reference.line_start === reference.line_end ? '' : `–${reference.line_end}`} selected · Shift-click another line for a range.`
+    ? `${citationLocation(reference)} selected · Shift-click another line for a range.`
     : 'Select a line to copy its source reference.';
-  for (const row of $('source-lines').children) {
+  for (const row of $('source-lines').querySelectorAll('.source-line')) {
     const number = Number(row.dataset.line);
     const selected = Boolean(reference && number >= reference.line_start && number <= reference.line_end);
     row.classList.toggle('selected', selected);
@@ -105,11 +121,17 @@ function renderViewer() {
   $('source-tab').setAttribute('aria-pressed', String(state.view === 'source'));
   $('json-tab').setAttribute('aria-pressed', String(state.view === 'json'));
   const fragment = document.createDocumentFragment();
+  let lastPage = null;
   if (source) for (const line of source.lines) {
+    if (line.page_number && line.page_number !== lastPage) {
+      fragment.append(element('div', 'page-marker', `Page ${line.page_number} · Extracted text`));
+      lastPage = line.page_number;
+    }
     const row = element('button', 'source-line');
     row.dataset.line = String(line.line_number);
-    row.setAttribute('aria-label', `Select source line ${line.line_number}: ${line.text}`);
-    row.append(element('span', 'line-number', line.line_number), element('span', 'line-text', line.text));
+    const location = line.page_number ? `page ${line.page_number}, extracted line ${line.page_line_number}` : `source line ${line.line_number}`;
+    row.setAttribute('aria-label', `Select ${location}: ${line.text}`);
+    row.append(element('span', 'line-number', line.page_line_number ?? line.line_number), element('span', 'line-text', line.text));
     row.addEventListener('click', (event) => {
       if (!event.shiftKey || state.start === null) state.start = line.line_number;
       state.end = line.line_number;
@@ -176,7 +198,7 @@ async function uploadFiles(fileList) {
   if (state.busy || !state.user || !fileList.length) return;
   const files = Array.from(fileList);
   if (files.length + state.documents.length > limits.max_files) return notice('Keep up to 12 documents in the workspace. Remove a document before adding more.', true);
-  if (files.some((file) => !file.name.toLowerCase().endsWith('.txt'))) return notice('Choose .txt files saved as UTF-8.', true);
+  if (files.some((file) => !/\.(txt|pdf)$/i.test(file.name))) return notice('Choose UTF-8 TXT or text PDF files. Scanned PDFs need OCR, which is not supported.', true);
   if (files.some((file) => file.size > limits.max_file_bytes)) return notice('Each file must be 256 KiB or smaller.', true);
   if (files.reduce((sum, file) => sum + file.size, 0) > limits.max_total_bytes) return notice('Upload up to 2 MiB of text at a time.', true);
   busy(true);
@@ -351,7 +373,7 @@ function citationButtons(citations) {
   const links = element('div', 'result-citations');
   for (const cite of citations || []) {
     const name = state.documents.find((doc) => doc.document_id === cite.document_id)?.file_name || cite.document_id;
-    const range = cite.line_start === cite.line_end ? `line ${cite.line_start}` : `lines ${cite.line_start}–${cite.line_end}`;
+    const range = citationLocation(cite);
     const button = element('button', 'text-button result-citation', `${name}, ${range}`);
     button.title = `${cite.document_id}: ${cite.quote}`;
     button.addEventListener('click', () => showCitation(cite));

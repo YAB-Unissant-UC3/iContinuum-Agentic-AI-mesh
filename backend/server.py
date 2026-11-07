@@ -1,4 +1,4 @@
-"""Small, localhost-only development server. No third-party dependencies."""
+"""Small, localhost-only development server; pypdf extracts text PDFs."""
 
 import base64
 import binascii
@@ -41,7 +41,7 @@ def _documents_response(documents):
     return {"api_version": "1.0", "documents": documents}
 
 
-def _read_uploads(payload):
+def _decode_uploads(payload):
     files = payload.get("files")
     if not isinstance(files, list) or not 1 <= len(files) <= MAX_FILES:
         raise RequestError("invalid_files", "Provide between 1 and 12 files.")
@@ -69,10 +69,10 @@ def _read_uploads(payload):
             raise RequestError("file_too_large", "Use files up to 256 KiB, with 2 MiB total per request.", 413)
         endings = len(re.findall(rb"\r\n|\r|\n", raw_bytes))
         lines = endings + int(bool(raw_bytes) and not raw_bytes.endswith((b"\r", b"\n")))
-        if lines > MAX_LINES_PER_FILE:
+        if name.lower().endswith(".txt") and lines > MAX_LINES_PER_FILE:
             raise RequestError("too_many_lines", "Each file can contain at most 10,000 lines.", 413)
         decoded.append((name, raw_bytes))
-    return _documents_response([read_document_bytes(name, data) for name, data in decoded])
+    return decoded
 
 
 class WorkspaceHandler(BaseHTTPRequestHandler):
@@ -231,8 +231,9 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                 with workspace.lock:
                     user = self._user()
                     request = workspace.resolve_analysis(payload, user)
+                    pdf_sources = workspace.pdf_sources(request["documents"], user)
                 # No workspace-wide lock is held while waiting on the provider.
-                result = analyze_documents(request, brief_generator=self.server.brief_generator)
+                result = analyze_documents(request, brief_generator=self.server.brief_generator, pdf_sources=pdf_sources)
                 with workspace.lock:
                     user = self._user()
                     workspace.resolve_analysis(payload, user)
@@ -256,8 +257,10 @@ class WorkspaceHandler(BaseHTTPRequestHandler):
                     access = payload.get("access", "public")
                     if access == "restricted" and user["role"] != "manager":
                         raise RequestError("access_denied", "Only Managers can register restricted uploads.", 403)
-                    uploaded = _read_uploads(payload)["documents"]
-                    result = _documents_response(workspace.register(uploaded, access, user))
+                    decoded = _decode_uploads(payload)
+                    workspace.authorize_uploads(decoded, access, user)
+                    uploaded = [read_document_bytes(name, raw) for name, raw in decoded]
+                    result = _documents_response(workspace.register(uploaded, access, user, decoded))
                 elif review_route:
                     result = workspace.review(review_route[1], payload, user)
             self._json(200, result)

@@ -151,6 +151,7 @@ main { max-width: 1420px; margin: 0 auto; padding: 28px 42px 0; }
 .source-line.selected { border-left-color: var(--accent); background: var(--accent-wash); }
 .line-number { flex-shrink: 0; width: 34px; margin-right: 20px; color: var(--muted); font: 10px/1.8 ui-monospace, Consolas, monospace; text-align: right; user-select: none; }
 .line-text { min-height: 21px; white-space: pre; }
+.page-marker { padding: 12px 22px; border-block: 1px solid var(--rule); color: var(--muted); font-size: 11px; }
 .json-preview { flex: 1; min-height: 270px; max-height: 440px; overflow: auto; margin: 0; padding: 20px 22px; font: 11px/1.8 ui-monospace, Consolas, monospace; }
 .citation-bar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: auto; padding: 16px 22px; border-top: 1px solid var(--rule); }
 .citation-bar .tiny-label { font-size: 9px; }

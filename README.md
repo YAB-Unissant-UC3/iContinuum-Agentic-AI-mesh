@@ -12,14 +12,14 @@ The local prototype includes the Document Reader, a browser workspace, and a
 Python API, authentication, role permissions, and Manager review. It runs in
 **deterministic demo mode by default**, with a backend-only AI Brief Generator:
 Groq GPT OSS 20B is preferred when configured, and Gemini is optional.
-Both preserve deterministic fallback. No third-party Python packages
-or frontend build step are needed. Live generation requires explicit opt-in.
+Both preserve deterministic fallback. PDF extraction uses `pypdf`; no frontend
+build step is needed. Live generation requires explicit opt-in.
 The API is
 independent of model choice; it does not require Unissant's model.
 
 **Start here:** [full-workflow demo guide](docs/demo-guide.md), including exact
 commands, demo credentials, document swapping, limitations, and a ten-minute
-presentation sequence. No database or new Python dependencies are needed.
+presentation sequence. No database is needed.
 
 See [AI providers](docs/ai-providers.md) for selection, configuration, audit/review
 semantics, mocked tests, and startup steps. [Gemini Phase 1](docs/gemini-phase1.md)
@@ -32,6 +32,7 @@ deterministic; [Phase 2](docs/phase2-plan.md) is a plan only.
 From this repository folder, run:
 
 ```powershell
+python -m pip install -r requirements.txt
 python -m backend
 ```
 
@@ -41,12 +42,12 @@ Press **Ctrl+C** in the terminal to stop. If port 8000 is busy, run
 
 The **frontend** is the page you interact with. The **API** is the Python layer
 that receives its requests and calls the reader. One Python command starts
-both; Node.js, npm, and extra Python packages are not needed to use the app.
+both; Node.js and npm are not needed to use the app.
 
 Sign in as `analyst` / `AnalystDemo!2026` or `manager` / `ManagerDemo!2026`.
 These are synthetic local-demo accounts, not production credentials.
 
-You can upload UTF-8 `.txt` files, load authorized fictional examples, inspect
+You can upload UTF-8 `.txt` and text `.pdf` files, load authorized fictional examples, inspect
 numbered lines, copy a source citation (Shift-click for a range), remove files,
 and download JSON. Select Brief Generator or Requirements Checker to download
 an analysis request or run the integrated analysis. Each result includes cited
@@ -60,6 +61,10 @@ the page view, and saved runs can be reopened after login. Audit metadata
 persists in the ignored `.runtime/audit.jsonl` file. Limits are 12 documents,
 256 KiB and 10,000 lines per file, and
 2 MiB total per upload request. Identical contents are skipped in the browser.
+PDFs also have a 50-page limit and bounded extraction. Citations retain global
+line ranges and add page-local references verified against extracted text.
+See [PDF support and story documents](docs/pdf-support.md) for the format,
+access rules, extraction limits, and limitations. No OCR or DOCX is supported.
 
 - [Full-workflow demo guide](docs/demo-guide.md)
 - [Team API contract and analysis output](docs/api-contract.md)
@@ -76,14 +81,14 @@ backend/             Local server, upload API, and analysis connection point
 frontend/            HTML page, CSS styling, and browser JavaScript
 document_reader/     Shared extraction code and original command-line reader
 mesh/                Existing deterministic agents and retention-conflict rules
-sample_documents/    Original three sources, restricted example, access manifest
+sample_documents/    Original examples, five story documents, access manifest
 tests/               Reader and HTTP API tests
 docs/                Team interface contract and evaluation notes
 ```
 
 ## Setup
 
-Use Python 3.9 or newer. In PowerShell, open the repository folder and check:
+Use Python 3.10 or newer (required by pypdf 7). In PowerShell, open the repository folder and check:
 
 ```powershell
 python --version
@@ -92,7 +97,8 @@ python --version
 If your computer uses the Windows Python launcher, try `py --version` and replace
 `python` with `py` in the commands below. If neither command reports a Python
 version, install [Python for Windows](https://www.python.org/downloads/windows/)
-before running the reader. No `pip install` is needed.
+before running the reader. Install the one dependency with
+`python -m pip install -r requirements.txt`.
 
 ## Read a document
 

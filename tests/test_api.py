@@ -89,7 +89,7 @@ class WorkspaceAPITests(unittest.TestCase):
     def test_demo_and_uploaded_files_have_identical_ids(self):
         status, result, _ = self.request("GET", "/api/demo")
         self.assertEqual(status, 200)
-        self.assertEqual(len(result["documents"]), 3)
+        self.assertEqual(len(result["documents"]), 7)
         for document in result["documents"]:
             path = ROOT / document["source_path"]
             self.assertEqual(document["document_id"], read_document(path)["document_id"])
@@ -98,7 +98,7 @@ class WorkspaceAPITests(unittest.TestCase):
             self.assertEqual(uploaded["documents"][0]["document_id"], document["document_id"])
 
     def test_empty_invalid_encoding_and_unsupported_type_are_per_file_results(self):
-        files = [upload(data=b""), upload("invalid.txt", b"\xff"), upload("source.pdf", b"PDF"), upload("ok.txt", b"ok")]
+        files = [upload(data=b""), upload("invalid.txt", b"\xff"), upload("source.docx", b"DOCX"), upload("ok.txt", b"ok")]
         status, result, _ = self.request("POST", "/api/documents", {"files": files})
         self.assertEqual(status, 200)
         self.assertEqual([item["status"] for item in result["documents"]], ["empty", "error", "error", "ok"])
